@@ -1,0 +1,24 @@
+{
+  "name": "sri2postgres",
+  "version": "1.0.1",
+  "description": "This is a module to sync any SRI interface to one or more database tables in a postgres 9.4 instance",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xpitr256/sri2postgres.git"
+  },
+  "keywords": [
+    "SRI",
+    "postgres",
+    "node",
+    "node.js"
+  ],
+  "author": "Pablo Rodriguez Massuh <pablomassuh@gmail.com>",
+  "license": "LGPL",
+  "bugs": {
+    "url": "https://github.com/xpitr256/sri2postgres/issues"
+  }
+}
