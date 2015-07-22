@@ -4,7 +4,13 @@
   "description": "This is a module to sync any SRI interface to one or more database tables in a postgres 9.4 instance",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "mocha"
+  },
+  "devDependencies": {
+    "express": "~4.9.x",
+    "pg": "2.x",
+    "mocha": "~2.2.4",
+    "node-uuid": "~1.4.3"
   },
   "repository": {
     "type": "git",
