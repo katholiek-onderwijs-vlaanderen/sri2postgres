@@ -1,6 +1,6 @@
 {
   "name": "sri2postgres",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "This is a module to sync any SRI interface to one or more database tables in a postgres 9.4 instance",
   "main": "./src/lib/client.js",
   "scripts": {
@@ -12,7 +12,7 @@
     "mocha": "~2.2.4",
     "node-uuid": "~1.4.3"
   },
-  "dependencies":{
+  "dependencies": {
     "needle": "~0.9.2"
   },
   "repository": {
