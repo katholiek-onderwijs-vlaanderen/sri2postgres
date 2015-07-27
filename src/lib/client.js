@@ -1,19 +1,20 @@
 /**
  * Created by pablo on 23/07/15.
  */
-module.exports = Client;
 
-function Client(config) {
+var needle = require('needle');
+
+// Constructor
+function Client (config) {
 
     config = config || {};
 
-    if (!config.hasOwnProperty('api')) {
+    if (!config.hasOwnProperty('apiUrl')) {
         throw new Error('Api is not defined.');
     }
 
     this.apiUrl = config.apiUrl;
-    this.apiUser = config.apiUser;
-    this.apiPassword = config.apiPassword;
+    this.apiCredentials = config.credentials;
 
     this.dbUser = config.dbUser;
     this.dbPassword = config.dbPassword;
@@ -21,8 +22,10 @@ function Client(config) {
     this.dbPort = config.dbPort;
     this.dbHost = config.dbHost;
     this.dbSsl = config.dbSsl;
+    this.dbTable = config.dbTable;
 }
 
+// class methods
 Client.prototype.connect = function(next) {
     console.log("Connecting to PG");
 }
@@ -30,3 +33,12 @@ Client.prototype.connect = function(next) {
 Client.prototype.saveContent = function(next) {
     console.log("Saving content from API to PG");
 }
+
+Client.prototype.getApiContent = function(next) {
+    needle.get(this.apiUrl,this.apiCredentials, function (error,response) {
+        next(error,response);
+    });
+}
+
+// export the class
+module.exports = Client;
