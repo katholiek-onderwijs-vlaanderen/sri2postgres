@@ -3,6 +3,7 @@
  */
 
 var needle = require('needle');
+var pg = require('pg');
 
 // Constructor
 function Client (config) {
@@ -21,13 +22,34 @@ function Client (config) {
     this.database = config.database;
     this.dbPort = config.dbPort;
     this.dbHost = config.dbHost;
-    this.dbSsl = config.dbSsl;
+    this.dbSsl = config.hasOwnProperty('dbSsl') ? config.dbSsl : false;
     this.dbTable = config.dbTable;
+
+    this.postgresClient = null;
+
+    this.createPostgresClient = function(){
+
+        this.postgresClient = new pg.Client({
+            user: this.dbUser,
+            password: this.dbPassword,
+            database: this.database,
+            port: this.dbPort,
+            host: this.dbHost,
+            ssl: this.dbSsl
+        });
+    }
 }
 
 // class methods
 Client.prototype.connect = function(next) {
-    console.log("Connecting to PG");
+
+    if ( this.postgresClient == null){
+        this.createPostgresClient();
+    }
+
+    this.postgresClient.connect(function(err) {
+        next(err);
+    });
 }
 
 Client.prototype.saveContent = function(next) {

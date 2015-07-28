@@ -31,4 +31,41 @@ describe('Accesing external json date Api', function() {
             done();
         });
     })
+
+
+
+    describe('with basic auth',function(){
+
+        it('should respond OK with valid credentials', function (done) {
+
+            var config = {
+                apiUrl : "http://dump.getpostman.com/auth/basic",
+                credentials: { username: 'postman', password: 'password' }
+            }
+
+            var sri2postgres = createSri2PostgresInstance(config);
+
+            sri2postgres.getApiContent(function (error,response) {
+                expect(response.statusCode).to.equal(200);
+                done();
+            });
+        })
+
+        it('should return 401 error with invalid username and password',function(){
+
+            var config = {
+                apiUrl : "http://dump.getpostman.com/auth/basic",
+                credentials: { username: 'bad.user', password: 'bad.passowrd' }
+            }
+
+            var sri2postgres = createSri2PostgresInstance(config);
+
+            sri2postgres.getApiContent(function (error,response) {
+                expect(response.statusCode).to.equal(401);
+                done();
+            });
+        })
+    });
+
+
 });
