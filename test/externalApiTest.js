@@ -9,7 +9,7 @@ var createSri2PostgresInstance = function (config) {
     return new Client(config);
 };
 
-describe('Accesing external json date Api', function() {
+describe('Accessing external json date Api', function() {
 
     describe('passing null URL', function(){
 

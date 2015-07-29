@@ -8,3 +8,5 @@ CREATE TABLE "jsonb" (
     "key" uuid unique,
     "details" jsonb
 );
+
+DROP SCHEMA IF EXISTS sri2postgres CASCADE;

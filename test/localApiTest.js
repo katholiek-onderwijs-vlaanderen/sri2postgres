@@ -10,7 +10,7 @@ var createSri2PostgresInstance = function (config) {
     return new Client(config);
 };
 
-describe('Accesing local json Api', function() {
+describe('Accessing local json Api', function() {
 
     it('should respond to GET', function (done) {
 
