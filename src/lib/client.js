@@ -4,6 +4,7 @@
 
 var needle = require('needle');
 var pg = require('pg');
+var Q = require('q');
 
 // Constructor
 function Client (config) {
@@ -52,8 +53,21 @@ Client.prototype.connect = function(next) {
     });
 }
 
-Client.prototype.saveContent = function(next) {
-    console.log("Saving content from API to PG");
+//Creating-NodeJS-modules-with-both-promise-and-callback-API-support-using-Q
+Client.prototype.saveContent = function(table,callback) {
+
+    var deferred = Q.defer();
+
+    if (table) {
+        var fullName = "TABLE:" + " " + table;
+        deferred.resolve(fullName);
+    }
+    else {
+        deferred.reject("table must be passed.");
+    }
+
+    deferred.promise.nodeify(callback);
+    return deferred.promise;
 }
 
 Client.prototype.getApiContent = function(next) {

@@ -41,8 +41,29 @@ describe('sri2postgres save content',function(){
     })
 
     it('persist JSON from api to configured postgres table',function(done){
-        console.log("ACT: extract content from api and save it");
-        console.log("ASSERT: query local database to check if content was saved");
+
+        //console.log("ACT: extract content from api and save it");
+        //console.log("ASSERT: query local database to check if content was saved");
+
+        var config = {
+            apiUrl : "http://date.jsontest.com/",
+            dbUser: "admin",
+            dbPassword: "admin",
+            database: "postgres",
+            dbPort: "5433",
+            dbHost: "localhost"
+        }
+
+        var sri2postgres = new Client(config);
+
+        sri2postgres.saveContent("parameter table")
+            .then(function (result) {
+                console.log(result);
+            })
+            .fail(function (error) {
+
+            });
+
         done();
     })
 

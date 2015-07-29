@@ -3,3 +3,6 @@ This is a module to sync any SRI interface to one or more database tables in a p
 
 # About
 This library is under construction.
+
+# Tests
+In order to run tests it is needed to install postgres 9.4 or superior in your machine.
