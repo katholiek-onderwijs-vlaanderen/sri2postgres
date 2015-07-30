@@ -58,7 +58,9 @@ describe('sri2postgres save content',function(){
     });
 
     it('persist JSON from api to configured postgres table',function(done){
-        sri2postgres.saveContent('tableName').should.eventually.have.property("status").equal("ok").and.notify(done);
+        sri2postgres.connect(function (error) {
+            sri2postgres.saveContent('sri2postgres.jsonb').should.eventually.have.property("rowCount").equal(1).and.notify(done);
+        });
     });
 
     after(function(done) {

@@ -5,6 +5,7 @@
 var needle = require('needle');
 var pg = require('pg');
 var Q = require('q');
+var uuid = require('node-uuid');
 
 // Constructor
 function Client (config) {
@@ -41,6 +42,24 @@ function Client (config) {
     }
 }
 
+//private method
+var insertData = function(jsonData) {
+
+    var deferred = Q.defer();
+    var key = uuid.v4();
+    var insertQuery  = "INSERT INTO "+this.Client.dbTable+" VALUES ('"+key+"','"+JSON.stringify(jsonData.body)+"')";
+
+    this.Client.postgresClient.query(insertQuery, function (error, result) {
+        if (error) {
+            deferred.reject(new Error(error));
+        } else {
+            deferred.resolve(result);
+        }
+    });
+
+    return deferred.promise;
+}
+
 // class methods
 Client.prototype.connect = function(next) {
 
@@ -61,8 +80,8 @@ Client.prototype.saveContent = function(table,callback) {
     if (table) {
         this.dbTable = table;
 
-        this.getApiContent().then(function(response){
-            deferred.resolve(response.body);
+        this.getApiContent().then(insertData).then(function(response){
+            deferred.resolve(response);
         }).fail(function(error){
             deferred.reject(error);
         });
@@ -79,10 +98,16 @@ Client.prototype.getApiContent = function(next) {
 
     var deferred = Q.defer();
 
+    var clientCopy = this;
+
+    // Implementing a wrapper to convert getApiContent in a Q Promise
     needle.get(this.apiUrl,this.apiCredentials, function (error,response) {
         if (error) {
             deferred.reject(new Error(error));
         } else {
+
+            //Doing this bind to keep Client instance reference.
+            this.Client = clientCopy;
             deferred.resolve(response);
         }
     });
