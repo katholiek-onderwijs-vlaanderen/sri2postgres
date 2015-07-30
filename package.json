@@ -10,7 +10,8 @@
     "express": "~4.9.x",
     "mocha": "~2.2.4",
     "node-uuid": "~1.4.3",
-    "chai": "~3.2.0"
+    "chai": "~3.2.0",
+    "chai-as-promised": "5.1.x"
   },
   "dependencies": {
     "needle": "~0.9.2",

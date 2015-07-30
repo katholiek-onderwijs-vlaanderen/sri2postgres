@@ -22,7 +22,7 @@ describe('Accessing external json date Api', function() {
     it('should respond to GET', function (done) {
 
         var config = {
-            apiUrl : "http://date.jsontest.com/"
+            apiUrl : "http://dump.getpostman.com/status"
         }
         var sri2postgres = createSri2PostgresInstance(config);
 
@@ -51,7 +51,7 @@ describe('Accessing external json date Api', function() {
             });
         })
 
-        it('should return 401 error with invalid username and password',function(){
+        it('should return 401 error with invalid username and password',function(done){
 
             var config = {
                 apiUrl : "http://dump.getpostman.com/auth/basic",
