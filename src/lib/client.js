@@ -51,7 +51,7 @@ Client.prototype.connect = function(next) {
     this.postgresClient.connect(function(err) {
         next(err);
     });
-}
+};
 
 //Creating-NodeJS-modules-with-both-promise-and-callback-API-support-using-Q
 Client.prototype.saveContent = function(table,callback) {
@@ -59,8 +59,13 @@ Client.prototype.saveContent = function(table,callback) {
     var deferred = Q.defer();
 
     if (table) {
-        var fullName = "TABLE:" + " " + table;
-        deferred.resolve(fullName);
+        this.dbTable = table;
+
+        this.getApiContent().then(function(response){
+            deferred.resolve(response.body);
+        }).fail(function(error){
+            deferred.reject(error);
+        });
     }
     else {
         deferred.reject("table must be passed.");
@@ -68,13 +73,23 @@ Client.prototype.saveContent = function(table,callback) {
 
     deferred.promise.nodeify(callback);
     return deferred.promise;
-}
+};
 
 Client.prototype.getApiContent = function(next) {
+
+    var deferred = Q.defer();
+
     needle.get(this.apiUrl,this.apiCredentials, function (error,response) {
-        next(error,response);
+        if (error) {
+            deferred.reject(new Error(error));
+        } else {
+            deferred.resolve(response);
+        }
     });
-}
+
+    deferred.promise.nodeify(next);
+    return deferred.promise;
+};
 
 // export the class
 module.exports = Client;

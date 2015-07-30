@@ -1,7 +1,7 @@
 /**
  * Created by pablo on 29/07/15.
  */
-var expect  = require("chai").expect;
+
 var Client = require('./../src/lib/client.js');
 var pg = require('pg');
 var chai = require("chai");
@@ -41,7 +41,7 @@ var config = {
     database: "postgres",
     dbPort: "5433",
     dbHost: "localhost"
-}
+};
 
 describe('sri2postgres save content',function(){
 
@@ -49,20 +49,20 @@ describe('sri2postgres save content',function(){
     before(function(done){
         var creationQuery = "CREATE SCHEMA sri2postgres AUTHORIZATION admin; SET search_path TO sri2postgres; DROP TABLE IF EXISTS jsonb CASCADE; CREATE TABLE jsonb (key uuid unique,details jsonb);";
         executeQuery(creationQuery,done);
-    })
+    });
 
     var sri2postgres = new Client(config);
 
     it('should throw an error if not table is defined',function(done){
         sri2postgres.saveContent().should.be.rejected.and.notify(done);
-    })
+    });
 
     it('persist JSON from api to configured postgres table',function(done){
-        sri2postgres.saveContent('tableName').should.eventually.equal("TABLE: tableName").and.notify(done);
-    })
+        sri2postgres.saveContent('tableName').should.eventually.have.property("status").equal("ok").and.notify(done);
+    });
 
     after(function(done) {
         var dropQuery= "DROP SCHEMA IF EXISTS sri2postgres CASCADE;";
         executeQuery(dropQuery,done);
     });
-})
+});
