@@ -7,8 +7,12 @@ var pg = require('pg');
 var chai = require("chai");
 var should = require( 'chai' ).should();
 var chaiAsPromised = require( 'chai-as-promised' );
+var fs = require('fs');
 
 chai.use(chaiAsPromised);
+
+var configurationFile = './test/config.json';
+var config = JSON.parse(fs.readFileSync(configurationFile));
 
 //Set up Database schema and table
 //Perform test with asserts
@@ -16,7 +20,7 @@ chai.use(chaiAsPromised);
 
 executeQuery = function (query, done) {
 
-    var conString = "postgres://admin:admin@localhost:5433/postgres";
+    var conString = "postgres://"+config.dbUser+":"+config.dbPassword+"@"+config.dbHost+":"+config.dbPort+"/"+config.database;
     var localDatabaseClient = new pg.Client(conString);
 
     localDatabaseClient.connect(function (err) {
@@ -34,20 +38,11 @@ executeQuery = function (query, done) {
     });
 };
 
-var config = {
-    apiUrl : "http://dump.getpostman.com/status",
-    dbUser: "admin",
-    dbPassword: "admin",
-    database: "postgres",
-    dbPort: "5433",
-    dbHost: "localhost"
-};
-
 describe('sri2postgres save content',function(){
 
     //VERY important adding done parameter to make async function wait
     before(function(done){
-        var creationQuery = "CREATE SCHEMA sri2postgres AUTHORIZATION admin; SET search_path TO sri2postgres; DROP TABLE IF EXISTS jsonb CASCADE; CREATE TABLE jsonb (key uuid unique,details jsonb);";
+        var creationQuery = "CREATE SCHEMA sri2postgres AUTHORIZATION "+config.dbUser+"; SET search_path TO sri2postgres; DROP TABLE IF EXISTS jsonb CASCADE; CREATE TABLE jsonb (key uuid unique,details jsonb);";
         executeQuery(creationQuery,done);
     });
 

@@ -3,18 +3,13 @@
  */
 var expect  = require("chai").expect;
 var Client = require('./../src/lib/client.js');
+var fs = require('fs');
+
+var configurationFile = './test/config.json';
+var config = JSON.parse(fs.readFileSync(configurationFile));
 
 describe('Connecting to a correct Postgres DataBase',function(){
     it('should respond with no error', function (done) {
-
-        var config = {
-            apiUrl : "http://date.jsontest.com/",
-            dbUser: "admin",
-            dbPassword: "admin",
-            database: "postgres",
-            dbPort: "5433",
-            dbHost: "localhost"
-        };
 
         var sri2postgres = new Client(config);
 
