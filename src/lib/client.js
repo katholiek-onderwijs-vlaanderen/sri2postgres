@@ -5,6 +5,7 @@
 var needle = require('needle');
 var pg = require('pg');
 var Q = require('q');
+var Transaction = require('pg-transaction');
 
 // Constructor
 function Client (config) {
@@ -28,6 +29,8 @@ function Client (config) {
 
     this.postgresClient = null;
 
+    this.lastSync = null;
+
     this.createPostgresClient = function(){
 
         this.postgresClient = new pg.Client({
@@ -39,6 +42,41 @@ function Client (config) {
             ssl: this.dbSsl
         });
     }
+}
+
+var insertResources = function(jsonData) {
+
+    var deferred = Q.defer();
+    var count = jsonData.body.results.length;
+
+    var tx = new Transaction(this.Client.postgresClient);
+
+    tx.on('error', function(error){
+        deferred.reject(new Error(error));
+    });
+
+    tx.begin();
+
+    for (var i = 0; i < count; i++){
+        var key = jsonData.body.results[i].$$expanded.key;
+        var insertQuery  = "INSERT INTO "+this.Client.dbTable+" VALUES ('"+key+"','"+JSON.stringify(jsonData.body.results[i].$$expanded)+"')";
+        tx.query(insertQuery);
+    }
+
+    tx.commit(function(error){
+        if (error){
+            deferred.reject(new Error(error));
+        }else{
+            deferred.resolve({rowCount:1});
+        }
+    });
+
+    return deferred.promise;
+};
+
+
+var updateDateSync = function() {
+    this.lastSync = new Date();
 }
 
 var updateData = function(jsonData){
@@ -109,6 +147,7 @@ Client.prototype.saveContent = function(table,callback) {
         }
 
         this.getApiContent().then(insertData).then(function(response){
+            updateDateSync();
             deferred.resolve(response);
         }).fail(function(error){
             deferred.reject(error);
@@ -140,6 +179,20 @@ Client.prototype.getApiContent = function(next) {
     deferred.promise.nodeify(next);
     return deferred.promise;
 };
+
+Client.prototype.saveResources = function(callback){
+    var deferred = Q.defer();
+
+    this.getApiContent().then(insertResources).then(function(response){
+        updateDateSync();
+        deferred.resolve(response);
+    }).fail(function(error){
+        deferred.reject(error);
+    });
+
+    deferred.promise.nodeify(callback);
+    return deferred.promise;
+}
 
 // export the class
 module.exports = Client;
