@@ -3,7 +3,7 @@
   "dbUser": "admin",
   "dbPassword": "admin",
   "database": "postgres",
-  "dbPort": "5433",
+  "dbPort": "5432",
   "dbHost": "localhost",
   "dbSsl": false
 }

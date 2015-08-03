@@ -5,7 +5,6 @@
 var needle = require('needle');
 var pg = require('pg');
 var Q = require('q');
-var uuid = require('node-uuid');
 
 // Constructor
 function Client (config) {
@@ -42,14 +41,12 @@ function Client (config) {
     }
 }
 
-//private method
-var insertData = function(jsonData) {
-
+var updateData = function(jsonData){
     var deferred = Q.defer();
-    var key = uuid.v4();
-    var insertQuery  = "INSERT INTO "+this.Client.dbTable+" VALUES ('"+key+"','"+JSON.stringify(jsonData.body)+"')";
+    var key = jsonData.body.key;
+    var updateQuery  = "UPDATE "+this.Client.dbTable+" SET details = '"+JSON.stringify(jsonData.body)+"' WHERE key = '"+key+"'";
 
-    this.Client.postgresClient.query(insertQuery, function (error, result) {
+    this.Client.postgresClient.query(updateQuery, function (error, result) {
         if (error) {
             deferred.reject(new Error(error));
         } else {
@@ -58,7 +55,33 @@ var insertData = function(jsonData) {
     });
 
     return deferred.promise;
-}
+};
+
+//private method
+var insertData = function(jsonData) {
+
+    var deferred = Q.defer();
+    var key = jsonData.body.key;
+    var insertQuery  = "INSERT INTO "+this.Client.dbTable+" VALUES ('"+key+"','"+JSON.stringify(jsonData.body)+"')";
+
+    this.Client.postgresClient.query(insertQuery, function (error, result) {
+
+        //error.code == 23505 UNIQUE VIOLATION
+        if (error && error.code == 23505) {
+
+            updateData(jsonData).then(function(response){
+                deferred.resolve(response);
+            }).fail(function(error){
+                deferred.reject(new Error(error));
+            });
+
+        } else {
+            deferred.resolve(result);
+        }
+    });
+
+    return deferred.promise;
+};
 
 // class methods
 Client.prototype.connect = function(next) {
@@ -77,17 +100,19 @@ Client.prototype.saveContent = function(table,callback) {
 
     var deferred = Q.defer();
 
-    if (table) {
-        this.dbTable = table;
+    if ( !this.dbTable && !table){
+        deferred.reject("table must be passed.");
+    }else{
+
+        if (table) {
+            this.dbTable = table;
+        }
 
         this.getApiContent().then(insertData).then(function(response){
             deferred.resolve(response);
         }).fail(function(error){
             deferred.reject(error);
         });
-    }
-    else {
-        deferred.reject("table must be passed.");
     }
 
     deferred.promise.nodeify(callback);

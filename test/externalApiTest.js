@@ -9,7 +9,7 @@ var createSri2PostgresInstance = function (config) {
     return new Client(config);
 };
 
-describe('Accessing external json date Api', function() {
+describe('Accessing external json Api', function() {
 
     describe('passing null URL', function(){
 
@@ -17,20 +17,21 @@ describe('Accessing external json date Api', function() {
             var config = {};
             expect(createSri2PostgresInstance.bind(config)).to.throw(Error);
         })
-    })
+    });
 
     it('should respond to GET', function (done) {
 
         var config = {
             apiUrl : "http://dump.getpostman.com/status"
-        }
+        };
+
         var sri2postgres = createSri2PostgresInstance(config);
 
         sri2postgres.getApiContent(function (error,response) {
             expect(response.statusCode).to.equal(200);
             done();
         });
-    })
+    });
 
 
 
@@ -41,7 +42,7 @@ describe('Accessing external json date Api', function() {
             var config = {
                 apiUrl : "http://dump.getpostman.com/auth/basic",
                 credentials: { username: 'postman', password: 'password' }
-            }
+            };
 
             var sri2postgres = createSri2PostgresInstance(config);
 
@@ -49,14 +50,14 @@ describe('Accessing external json date Api', function() {
                 expect(response.statusCode).to.equal(200);
                 done();
             });
-        })
+        });
 
         it('should return 401 error with invalid username and password',function(done){
 
             var config = {
                 apiUrl : "http://dump.getpostman.com/auth/basic",
                 credentials: { username: 'bad.user', password: 'bad.passowrd' }
-            }
+            };
 
             var sri2postgres = createSri2PostgresInstance(config);
 

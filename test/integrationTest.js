@@ -28,7 +28,7 @@ executeQuery = function (query, done) {
             throw new Error("Could not connect to local database");
         }
 
-        localDatabaseClient.query(query, function (err, result) {
+        localDatabaseClient.query(query, function (err) {
             if (err) {
                 return console.error('error running query', err);
             }
@@ -46,6 +46,7 @@ describe('sri2postgres save content',function(){
         executeQuery(creationQuery,done);
     });
 
+    config.apiUrl = 'http://api.vsko.be/schools/a2aaf576-a3a4-11e3-ace8-005056872b95';
     var sri2postgres = new Client(config);
 
     it('should throw an error if not table is defined',function(done){
@@ -53,9 +54,15 @@ describe('sri2postgres save content',function(){
     });
 
     it('persist JSON from api to configured postgres table',function(done){
-        sri2postgres.connect(function (error) {
-            sri2postgres.saveContent('sri2postgres.jsonb').should.eventually.have.property("rowCount").equal(1).and.notify(done);
+
+        sri2postgres.connect(function () {
+            sri2postgres.dbTable = 'sri2postgres.jsonb';
+            sri2postgres.saveContent().should.eventually.have.property("rowCount").equal(1).and.notify(done);
         });
+    });
+
+    it('should update the same resource if it is saved again',function(done){
+        sri2postgres.saveContent().should.not.be.rejected.and.notify(done);
     });
 
     after(function(done) {
