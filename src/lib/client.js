@@ -12,11 +12,12 @@ function Client (config) {
 
     config = config || {};
 
-    if (!config.hasOwnProperty('apiUrl')) {
+    if (!config.hasOwnProperty('baseApiUrl')) {
         throw new Error('Api is not defined.');
     }
 
-    this.apiUrl = config.apiUrl;
+    this.baseApiUrl = config.baseApiUrl;
+    this.functionApiUrl = config.functionApiUrl
     this.apiCredentials = config.credentials;
 
     this.dbUser = config.dbUser;
@@ -27,9 +28,9 @@ function Client (config) {
     this.dbSsl = config.hasOwnProperty('dbSsl') ? config.dbSsl : false;
     this.dbTable = config.dbTable;
 
-    this.postgresClient = null;
-
     this.lastSync = null;
+
+    this.postgresClient = null;
 
     this.createPostgresClient = function(){
 
@@ -41,8 +42,16 @@ function Client (config) {
             host: this.dbHost,
             ssl: this.dbSsl
         });
-    }
+    };
+
+    this.updateDateSync = function() {
+        this.lastSync = new Date();
+    };
+
 }
+
+var totalSync = 0;
+var totalNotSync = 0;
 
 var insertResources = function(jsonData) {
 
@@ -51,8 +60,11 @@ var insertResources = function(jsonData) {
 
     var tx = new Transaction(this.Client.postgresClient);
 
+    var errorFound = false;
+
     tx.on('error', function(error){
-        deferred.reject(new Error(error));
+        //hast to pass the next but, storing that this one was skipped
+        errorFound = true;
     });
 
     tx.begin();
@@ -63,21 +75,19 @@ var insertResources = function(jsonData) {
         tx.query(insertQuery);
     }
 
-    tx.commit(function(error){
-        if (error){
-            deferred.reject(new Error(error));
+    tx.commit(function(){
+
+        if (errorFound){
+            totalNotSync += Number(jsonData.body.results.length);
         }else{
-            deferred.resolve({rowCount:1});
+            totalSync += Number(jsonData.body.results.length);
         }
+
+        deferred.resolve(jsonData.body.$$meta.next);
     });
 
     return deferred.promise;
 };
-
-
-var updateDateSync = function() {
-    this.lastSync = new Date();
-}
 
 var updateData = function(jsonData){
     var deferred = Q.defer();
@@ -147,7 +157,7 @@ Client.prototype.saveContent = function(table,callback) {
         }
 
         this.getApiContent().then(insertData).then(function(response){
-            updateDateSync();
+            this.Client.updateDateSync();
             deferred.resolve(response);
         }).fail(function(error){
             deferred.reject(error);
@@ -165,7 +175,7 @@ Client.prototype.getApiContent = function(next) {
     var clientCopy = this;
 
     // Implementing a wrapper to convert getApiContent in a Q Promise
-    needle.get(this.apiUrl,this.apiCredentials, function (error,response) {
+    needle.get(this.baseApiUrl+this.functionApiUrl,this.apiCredentials, function (error,response) {
         if (error) {
             deferred.reject(new Error(error));
         } else {
@@ -180,17 +190,29 @@ Client.prototype.getApiContent = function(next) {
     return deferred.promise;
 };
 
-Client.prototype.saveResources = function(callback){
+Client.prototype.saveResources = function(){
+
     var deferred = Q.defer();
 
-    this.getApiContent().then(insertResources).then(function(response){
-        updateDateSync();
-        deferred.resolve(response);
-    }).fail(function(error){
-        deferred.reject(error);
-    });
+    function recurse() {
 
-    deferred.promise.nodeify(callback);
+        this.Client.getApiContent().then(insertResources).then(function(nextPage){
+
+            if (typeof nextPage == 'undefined'){
+                this.Client.updateDateSync();
+
+                deferred.resolve({resourcesSync: totalSync,resourcesNotSync: totalNotSync });
+            }else{
+                this.Client.functionApiUrl = nextPage;
+                recurse();
+            }
+        }).fail(function(error){
+            deferred.reject(error);
+        });
+    }
+
+    recurse();
+
     return deferred.promise;
 }
 

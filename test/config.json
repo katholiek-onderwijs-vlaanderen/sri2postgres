@@ -1,5 +1,6 @@
 {
-  "apiUrl" : "http://dump.getpostman.com/status",
+  "baseApiUrl" : "http://dump.getpostman.com",
+  "functionApiUrl" : "/status",
   "dbUser": "admin",
   "dbPassword": "admin",
   "database": "postgres",

@@ -23,7 +23,8 @@ describe('sri2postgres save content',function(){
         databaseHelper.executeQuery(creationQuery,done);
     });
 
-    config.apiUrl = 'http://api.vsko.be/schools/a2aaf576-a3a4-11e3-ace8-005056872b95';
+    config.baseApiUrl = 'http://api.vsko.be';
+    config.functionApiUrl ='/schools/a2aaf576-a3a4-11e3-ace8-005056872b95';
     var sri2postgres = new Client(config);
 
     it('should throw an error if not table is defined',function(done){

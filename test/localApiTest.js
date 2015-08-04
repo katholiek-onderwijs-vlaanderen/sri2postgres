@@ -23,7 +23,8 @@ describe('Accessing local json Api', function() {
         app.listen(3000, function () {
 
             var config = {
-                apiUrl : " http://localhost:3000/"
+                baseApiUrl : " http://localhost:3000/",
+                functionApiUrl : ""
             }
             var sri2postgres = createSri2PostgresInstance(config);
 

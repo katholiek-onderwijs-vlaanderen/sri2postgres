@@ -22,7 +22,8 @@ describe('Accessing external json Api', function() {
     it('should respond to GET', function (done) {
 
         var config = {
-            apiUrl : "http://dump.getpostman.com/status"
+            baseApiUrl : "http://dump.getpostman.com",
+            functionApiUrl: "/status"
         };
 
         var sri2postgres = createSri2PostgresInstance(config);
@@ -40,7 +41,8 @@ describe('Accessing external json Api', function() {
         it('should respond OK with valid credentials', function (done) {
 
             var config = {
-                apiUrl : "http://dump.getpostman.com/auth/basic",
+                baseApiUrl : "http://dump.getpostman.com",
+                functionApiUrl: "/auth/basic",
                 credentials: { username: 'postman', password: 'password' }
             };
 
@@ -55,7 +57,8 @@ describe('Accessing external json Api', function() {
         it('should return 401 error with invalid username and password',function(done){
 
             var config = {
-                apiUrl : "http://dump.getpostman.com/auth/basic",
+                baseApiUrl : "http://dump.getpostman.com",
+                functionApiUrl: "/auth/basic",
                 credentials: { username: 'bad.user', password: 'bad.passowrd' }
             };
 
