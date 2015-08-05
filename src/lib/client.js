@@ -153,7 +153,7 @@ Client.prototype.connect = function(next) {
 };
 
 //Creating-NodeJS-modules-with-both-promise-and-callback-API-support-using-Q
-Client.prototype.saveContent = function(table,callback) {
+Client.prototype.saveResource = function(table,callback) {
 
     var deferred = Q.defer();
 
@@ -199,7 +199,7 @@ Client.prototype.getApiContent = function(next) {
     return deferred.promise;
 };
 
-Client.prototype.saveResources = function(){
+Client.prototype.saveResources = function(callback){
 
     var deferred = Q.defer();
 
@@ -220,8 +220,16 @@ Client.prototype.saveResources = function(){
         });
     }
 
-    recurse();
+    var deletionQuery = "DELETE FROM "+this.dbTable;
+    this.postgresClient.query(deletionQuery, function (err) {
+        if (err) {
+            deferred.reject(new Error(err));
+        }else{
+            recurse();
+        }
+    });
 
+    deferred.promise.nodeify(callback);
     return deferred.promise;
 }
 

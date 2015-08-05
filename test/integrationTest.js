@@ -28,19 +28,19 @@ describe('sri2postgres save content',function(){
     var sri2postgres = new Client(config);
 
     it('should throw an error if not table is defined',function(done){
-        sri2postgres.saveContent().should.be.rejected.and.notify(done);
+        sri2postgres.saveResource().should.be.rejected.and.notify(done);
     });
 
     it('persist JSON from api to configured postgres table',function(done){
 
         sri2postgres.connect(function () {
             sri2postgres.dbTable = 'sri2postgres.jsonb';
-            sri2postgres.saveContent().should.eventually.have.property("rowCount").equal(1).and.notify(done);
+            sri2postgres.saveResource().should.eventually.have.property("rowCount").equal(1).and.notify(done);
         });
     });
 
     it('should update the same resource if it is saved again',function(done){
-        sri2postgres.saveContent().should.not.be.rejected.and.notify(done);
+        sri2postgres.saveResource().should.not.be.rejected.and.notify(done);
     });
 
     after(function(done) {
