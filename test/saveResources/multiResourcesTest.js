@@ -9,6 +9,7 @@ var should = require( 'chai' ).should();
 var chaiAsPromised = require( 'chai-as-promised' );
 var fs = require('fs');
 
+chai.use(require('chai-datetime'));
 chai.use(chaiAsPromised);
 
 var configurationFile = './test/config.json';
@@ -53,7 +54,7 @@ describe('sri2postgres save an array of resources',function(){
     });
 
     it ('should saved last sync time',function(done){
-       //TODO use http://chaijs.com/plugins/chai-datetime
+        startedDateTime.should.beforeTime(sri2postgres.lastSync)
         done();
     });
 

@@ -53,6 +53,13 @@ function Client (config) {
 var totalSync = 0;
 var totalNotSync = 0;
 
+String.prototype.replaceAll = function(search, replace) {
+    if (replace === undefined) {
+        return this.toString();
+    }
+    return this.split(search).join(replace);
+}
+
 var insertResources = function(jsonData) {
 
     var deferred = Q.defer();
@@ -61,9 +68,9 @@ var insertResources = function(jsonData) {
     var tx = new Transaction(this.Client.postgresClient);
 
     var errorFound = false;
+    var insertQuery;
 
     tx.on('error', function(error){
-        //hast to pass the next but, storing that this one was skipped
         errorFound = true;
     });
 
@@ -71,7 +78,9 @@ var insertResources = function(jsonData) {
 
     for (var i = 0; i < count; i++){
         var key = jsonData.body.results[i].$$expanded.key;
-        var insertQuery  = "INSERT INTO "+this.Client.dbTable+" VALUES ('"+key+"','"+JSON.stringify(jsonData.body.results[i].$$expanded)+"')";
+        var stringifiedJson = JSON.stringify(jsonData.body.results[i].$$expanded);
+        stringifiedJson = stringifiedJson.replaceAll("'", "''");
+        insertQuery  = "INSERT INTO "+this.Client.dbTable+" VALUES ('"+key+"','"+stringifiedJson+"')";
         tx.query(insertQuery);
     }
 
