@@ -1,7 +1,7 @@
 # sri2postgres
 
 This is a module to sync any SRI interface to one database table in a postgres 9.4 instance.
-The SRI specification can [be found here][sri-specs].
+The SRI specification can [be found here](https://github.com/dimitrydhondt/sri).
 
 
 # Installing
@@ -46,7 +46,7 @@ Now we are ready to start sync resources.
 
 Below is a description of the different types of functions that you can use.
 It describes the inputs and outputs of the different functions.
-Most of these function return a [Q promise][kriskowal-q].
+Most of these function return a [Q promise](https://github.com/kriskowal/q).
 
 
 ### connect
@@ -89,10 +89,11 @@ Finally it tells you:
 - How many resources were saved
 - How many resources were NOT saved
 
+
     sri2postgres.connect(function () {
         sri2postgres.saveResources().then(function(result){
-            result.resourcesSync
-            result.resourcesNotSync
+        result.resourcesSync
+        result.resourcesNotSync
         });
     });
 
