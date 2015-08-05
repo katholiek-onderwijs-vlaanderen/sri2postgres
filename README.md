@@ -86,14 +86,15 @@ If just one INSERT query cannot be done, the whole TRANSACTION (in this 500 reso
 Once a TRANSACTION is finish the method will ask for the following page to the api ( in this case by asking http://api.mine.org/customers?limit=500&offset=500) until there are no more resource to save.
 Finally it tells you:
 
-- How many resources were saved
-- How many resources were NOT saved
+- How many resources were saved.
+- How many resources were NOT saved.
 
+Code example:
 
     sri2postgres.connect(function () {
         sri2postgres.saveResources().then(function(result){
-        result.resourcesSync
-        result.resourcesNotSync
+            result.resourcesSync
+            result.resourcesNotSync
         });
     });
 
