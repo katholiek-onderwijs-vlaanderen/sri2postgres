@@ -6,6 +6,7 @@ var needle = require('needle');
 var pg = require('pg');
 var Q = require('q');
 var Transaction = require('pg-transaction');
+var QueryStream = require('pg-query-stream');
 
 // Constructor
 function Client (config) {
@@ -220,6 +221,7 @@ Client.prototype.saveResources = function(callback){
         });
     }
 
+    //TODO re use code
     var deletionQuery = "DELETE FROM "+this.dbTable;
     this.postgresClient.query(deletionQuery, function (err) {
         if (err) {
@@ -231,7 +233,93 @@ Client.prototype.saveResources = function(callback){
 
     deferred.promise.nodeify(callback);
     return deferred.promise;
-}
+};
+
+
+Client.prototype.deleteFromTable = function(propertyConfig){
+
+    var deferred = Q.defer();
+
+    var deletionQuery = "DELETE FROM "+propertyConfig.targetTable;
+    this.postgresClient.query(deletionQuery, function (err) {
+        if (err) {
+            deferred.reject(new Error(err));
+        }else{
+            deferred.resolve(propertyConfig);
+        }
+    });
+
+    return deferred.promise;
+};
+
+
+Client.prototype.readFromTable = function(propertyConfig){
+
+    var deferred = Q.defer();
+    var sqlQuery = "SELECT key, "+propertyConfig.propertyName+" AS link FROM "+this.dbTable;
+    var query = new QueryStream(sqlQuery, [1000000]);
+    var stream = this.postgresClient.query(query);
+    var count = 0;
+
+    var tx = new Transaction(this.postgresClient);
+    tx.begin();
+
+    tx.on('error',function(error){
+        stream.pause();
+        deferred.reject(new Error(error));
+    });
+
+    stream.on('data',function(chunk){
+
+        stream.pause();
+        count++;
+
+        this.baseApiUrl = chunk.link;
+        this.functionApiUrl = '';
+
+        this.getApiContent().then(function(response){
+
+            var data = response.body.replaceAll("'", "''");
+            var insertQuery  = "INSERT INTO "+propertyConfig.targetTable+" VALUES ('"+chunk.key+"','"+data+"')";
+            tx.query(insertQuery);
+
+            if (count % propertyConfig.queriesPerTransaction == 0){
+
+                tx.commit(function(){
+                    tx.begin();
+                    stream.resume();
+                });
+            }else{
+                stream.resume();
+            }
+        });
+    });
+
+    stream.on('end',function(){
+        tx.commit(function(){
+            deferred.resolve(count);
+        });
+    });
+
+    return deferred.promise;
+};
+
+Client.prototype.saveResourcesInProperty = function(propertyConfig,callback){
+
+    var deferred = Q.defer();
+
+    // Delete all content from new database
+    this.deleteFromTable(propertyConfig)
+        .then(this.readFromTable)
+        .then(function(count){
+            deferred.resolve({resourcesSync: count});
+        }).fail(function(error){
+            deferred.reject(error);
+        });
+
+    deferred.promise.nodeify(callback);
+    return deferred.promise;
+};
 
 // export the class
 module.exports = Client;
