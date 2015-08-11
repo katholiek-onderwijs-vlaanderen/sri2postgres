@@ -267,13 +267,24 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
     var count = 0;
     var resourcesNotSync = 0;
     var resourcesSync = 0;
+    var resourcesSyncInActualTransaction = 0;
 
     var tx = new Transaction(sri2PostgresClient.postgresClient);
     tx.begin();
 
     tx.on('error',function(error){
         stream.pause();
-        deferred.reject(new Error(error));
+
+        tx.abort();
+        tx.begin();
+
+        resourcesNotSync += resourcesSyncInActualTransaction;
+        resourcesSyncInActualTransaction = 0;
+
+        stream.resume();
+
+        console.log("################## SEGUIMOS");
+
     });
 
     stream.on('data',function(chunk){
@@ -281,26 +292,28 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
         stream.pause();
         count++;
 
-
-        if (chunk.link.indexOf('.doc') >= 0 && chunk.link.indexOf('~$') == -1){
+        //if (chunk.link.indexOf('.doc') >= 0 && chunk.link.indexOf('~$') == -1){
+        if (chunk.link.indexOf('.docx') >= 0){
 
             sri2PostgresClient.baseApiUrl = chunk.link;
             sri2PostgresClient.functionApiUrl = '';
-
+            console.log(count+" : "+chunk.link);
             sri2PostgresClient.getApiContent().then(function(response){
 
                 if (response.body.length > 0 ){
 
                     var data = response.body.replaceAll("'", "''");
                     var insertQuery  = "INSERT INTO "+sri2PostgresClient.propertyConfig.targetTable+" VALUES ('"+chunk.key+"','"+data+"')";
-                    tx.query(insertQuery);
+                    resourcesSyncInActualTransaction++;
 
-                    resourcesSync++;
+                    tx.query(insertQuery);
 
                     if (count % sri2PostgresClient.propertyConfig.queriesPerTransaction == 0){
 
                         tx.commit(function(){
                             tx.begin();
+                            resourcesSync += resourcesSyncInActualTransaction;
+                            resourcesSyncInActualTransaction = 0;
                             stream.resume();
                         });
                     }else{
@@ -314,6 +327,7 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
             });
 
         }else{
+            resourcesNotSync++;
             stream.resume();
         }
 
@@ -321,6 +335,8 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
 
     stream.on('end',function(){
         tx.commit(function(){
+            resourcesSync += resourcesSyncInActualTransaction;
+            console.log(count);
             deferred.resolve({resourcesSync: resourcesSync, resourcesNotSync: resourcesNotSync});
         });
     });
@@ -336,6 +352,7 @@ Client.prototype.saveResourcesInProperty = function(propertyConfig,callback){
     this.deleteFromTable(propertyConfig)
         .then(this.readFromTable)
         .then(function(response){
+            console.log(response.resourcesSync + " | " + response.resourcesNotSync);
             deferred.resolve({resourcesSync: response.resourcesSync, resourcesNotSync: response.resourcesNotSync});
         }).fail(function(error){
             deferred.reject(error);
