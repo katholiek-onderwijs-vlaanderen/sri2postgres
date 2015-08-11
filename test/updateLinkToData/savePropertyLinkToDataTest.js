@@ -54,7 +54,7 @@ describe('sri2Postgres read an url property from jsonb ', function(){
             propertyName : "value->'attachments'->1->>'externalUrl'",
             targetTable: "sri2postgres.jsonb_content_as_text",
             queriesPerTransaction: 500
-        }
+        };
 
         sri2postgres.saveResourcesInProperty(propertyConfig)
             .should.eventually.have.property("resourcesSync").to.be.at.least(1).and.notify(done);
