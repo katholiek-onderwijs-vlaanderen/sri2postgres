@@ -265,7 +265,6 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
     var query = new QueryStream(sqlQuery, [1000000]);
     var stream = sri2PostgresClient.postgresClient.query(query);
     var count = 0;
-    var resourcesNotSync = 0;
     var resourcesSync = 0;
     var resourcesSyncInActualTransaction = 0;
 
@@ -278,12 +277,11 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
         tx.abort();
         tx.begin();
 
-        resourcesNotSync += resourcesSyncInActualTransaction;
+        console.log("TRANSACTION ERROR: "+resourcesSyncInActualTransaction+" resources will be discouraged");
+
         resourcesSyncInActualTransaction = 0;
 
         stream.resume();
-
-        console.log("################## SEGUIMOS");
 
     });
 
@@ -321,13 +319,11 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
                     }
 
                 }else{
-                    resourcesNotSync++;
                     stream.resume();
                 }
             });
 
         }else{
-            resourcesNotSync++;
             stream.resume();
         }
 
@@ -337,7 +333,7 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
         tx.commit(function(){
             resourcesSync += resourcesSyncInActualTransaction;
             console.log(count);
-            deferred.resolve({resourcesSync: resourcesSync, resourcesNotSync: resourcesNotSync});
+            deferred.resolve({resourcesSync: resourcesSync, resourcesNotSync: count-resourcesSync});
         });
     });
 
