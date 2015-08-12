@@ -61,10 +61,13 @@ String.prototype.replaceAll = function(search, replace) {
     return this.split(search).join(replace);
 }
 
-var insertResources = function(jsonData) {
+var insertResources = function(composeObject) {
 
     var deferred = Q.defer();
+
+    var jsonData = composeObject.jsonData;
     var count = jsonData.body.results.length;
+    var inserted = 0;
 
     var tx = new Transaction(this.Client.postgresClient);
 
@@ -78,22 +81,40 @@ var insertResources = function(jsonData) {
     tx.begin();
 
     for (var i = 0; i < count; i++){
-        var key = jsonData.body.results[i].$$expanded.key;
-        var stringifiedJson = JSON.stringify(jsonData.body.results[i].$$expanded);
-        stringifiedJson = stringifiedJson.replaceAll("'", "''");
-        insertQuery  = "INSERT INTO "+this.Client.dbTable+" VALUES ('"+key+"','"+stringifiedJson+"')";
-        tx.query(insertQuery);
+
+        //first check if there is a filter
+        if (composeObject.filter){
+
+            if ( composeObject.filter.isValid(jsonData.body.results[i]) ){
+                //TODO avoid duplicate code
+                var key = jsonData.body.results[i].$$expanded.key;
+                var stringifiedJson = JSON.stringify(jsonData.body.results[i].$$expanded);
+                stringifiedJson = stringifiedJson.replaceAll("'", "''");
+                insertQuery  = "INSERT INTO "+this.Client.dbTable+" VALUES ('"+key+"','"+stringifiedJson+"')";
+                tx.query(insertQuery);
+                inserted++;
+            }
+        }else{
+            //process all of them
+            var key = jsonData.body.results[i].$$expanded.key;
+            var stringifiedJson = JSON.stringify(jsonData.body.results[i].$$expanded);
+            stringifiedJson = stringifiedJson.replaceAll("'", "''");
+            insertQuery  = "INSERT INTO "+this.Client.dbTable+" VALUES ('"+key+"','"+stringifiedJson+"')";
+            tx.query(insertQuery);
+            inserted++;
+        }
+
     }
 
     tx.commit(function(){
 
         if (errorFound){
-            totalNotSync += Number(jsonData.body.results.length);
+            totalNotSync += Number(composeObject.jsonData.body.results.length);
         }else{
-            totalSync += Number(jsonData.body.results.length);
+            totalSync += Number(inserted);
         }
 
-        deferred.resolve(jsonData.body.$$meta.next);
+        deferred.resolve(composeObject.jsonData.body.$$meta.next);
     });
 
     return deferred.promise;
@@ -201,14 +222,21 @@ Client.prototype.getApiContent = function(next) {
 };
 
 
-Client.prototype.saveResources = function(callback){
+Client.prototype.saveResources = function(filter,callback){
 
     var deferred = Q.defer();
+    totalSync = 0;
+    totalNotSync = 0;
     var clientCopy = this;
 
-    function recurse() {
+    function recurse(filter) {
 
-        this.Client.getApiContent().then(insertResources).then(function(nextPage){
+        this.Client.getApiContent().then(function(jsonData){
+
+            var composeObject = {filter: filter,jsonData: jsonData};
+            return insertResources(composeObject);
+
+        }).then(function(nextPage){
 
             if (typeof nextPage == 'undefined'){
                 this.Client.updateDateSync();
@@ -216,7 +244,7 @@ Client.prototype.saveResources = function(callback){
                 deferred.resolve({resourcesSync: totalSync,resourcesNotSync: totalNotSync });
             }else{
                 this.Client.functionApiUrl = nextPage;
-                recurse();
+                recurse(filter);
             }
         }).fail(function(error){
             deferred.reject(error);
@@ -227,7 +255,7 @@ Client.prototype.saveResources = function(callback){
     this.deleteFromTable({targetTable:this.dbTable})
         .then(function(){
             this.Client = clientCopy;
-            recurse();
+            recurse(filter);
         })
         .fail(function(error){
             deferred.reject(new Error(error));
@@ -277,7 +305,7 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
         tx.abort();
         tx.begin();
 
-        console.log("TRANSACTION ERROR: "+resourcesSyncInActualTransaction+" resources will be discouraged");
+        console.log("TRANSACTION ERROR: "+error+ ". "+resourcesSyncInActualTransaction+" resources will be discouraged");
 
         resourcesSyncInActualTransaction = 0;
 
@@ -290,49 +318,40 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
         stream.pause();
         count++;
 
-        //if (chunk.link.indexOf('.doc') >= 0 && chunk.link.indexOf('~$') == -1){
-        if (chunk.link.indexOf('.docx') >= 0){
+        sri2PostgresClient.baseApiUrl = chunk.link;
+        sri2PostgresClient.functionApiUrl = '';
 
-            sri2PostgresClient.baseApiUrl = chunk.link;
-            sri2PostgresClient.functionApiUrl = '';
-            console.log(count+" : "+chunk.link);
-            sri2PostgresClient.getApiContent().then(function(response){
+        sri2PostgresClient.getApiContent().then(function(response){
 
-                if (response.body.length > 0 ){
+            if (response.body.length > 0 ){
 
-                    var data = response.body.replaceAll("'", "''");
-                    var insertQuery  = "INSERT INTO "+sri2PostgresClient.propertyConfig.targetTable+" VALUES ('"+chunk.key+"','"+data+"')";
-                    resourcesSyncInActualTransaction++;
+                var data = response.body.replaceAll("'", "''");
+                var insertQuery  = "INSERT INTO "+sri2PostgresClient.propertyConfig.targetTable+" VALUES ('"+chunk.key+"','"+data+"')";
+                resourcesSyncInActualTransaction++;
 
-                    tx.query(insertQuery);
+                tx.query(insertQuery);
 
-                    if (count % sri2PostgresClient.propertyConfig.queriesPerTransaction == 0){
+                if (count % sri2PostgresClient.propertyConfig.queriesPerTransaction == 0){
 
-                        tx.commit(function(){
-                            tx.begin();
-                            resourcesSync += resourcesSyncInActualTransaction;
-                            resourcesSyncInActualTransaction = 0;
-                            stream.resume();
-                        });
-                    }else{
+                    tx.commit(function(){
+                        tx.begin();
+                        resourcesSync += resourcesSyncInActualTransaction;
+                        resourcesSyncInActualTransaction = 0;
                         stream.resume();
-                    }
-
+                    });
                 }else{
                     stream.resume();
                 }
-            });
 
-        }else{
-            stream.resume();
-        }
-
+            }else{
+                stream.resume();
+            }
+        });
     });
 
     stream.on('end',function(){
         tx.commit(function(){
             resourcesSync += resourcesSyncInActualTransaction;
-            console.log(count);
             deferred.resolve({resourcesSync: resourcesSync, resourcesNotSync: count-resourcesSync});
         });
     });
@@ -348,7 +367,6 @@ Client.prototype.saveResourcesInProperty = function(propertyConfig,callback){
     this.deleteFromTable(propertyConfig)
         .then(this.readFromTable)
         .then(function(response){
-            console.log(response.resourcesSync + " | " + response.resourcesNotSync);
             deferred.resolve({resourcesSync: response.resourcesSync, resourcesNotSync: response.resourcesNotSync});
         }).fail(function(error){
             deferred.reject(error);

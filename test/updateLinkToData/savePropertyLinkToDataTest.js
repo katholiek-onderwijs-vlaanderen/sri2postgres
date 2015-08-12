@@ -3,6 +3,7 @@
  */
 var Client = require('./../../src/lib/client.js');
 var DatabaseHelper = require('./../DatabaseHelper.js');
+var CustomFilter = require('./../customFilter.js');
 var chai = require("chai");
 var expect  = require("chai").expect;
 var should = require( 'chai' ).should();
@@ -40,7 +41,8 @@ describe('sri2Postgres read an url property from jsonb ', function(){
         this.timeout(0);
 
         sri2postgres.connect(function () {
-            sri2postgres.saveResources().then(function(){
+            var filterObject = new CustomFilter();
+            sri2postgres.saveResources(filterObject).then(function(){
                 done();
             });
         });
@@ -53,8 +55,10 @@ describe('sri2Postgres read an url property from jsonb ', function(){
         var propertyConfig = {
             propertyName : "value->'attachments'->1->>'externalUrl'",
             targetTable: "sri2postgres.jsonb_content_as_text",
-            queriesPerTransaction: 500
+            queriesPerTransaction: 20
         };
+
+        sri2postgres.apiCredentials = { username: 'change_me', password: 'change_me' };
 
         sri2postgres.saveResourcesInProperty(propertyConfig)
             .should.eventually.have.property("resourcesSync").to.be.at.least(1).and.notify(done);
