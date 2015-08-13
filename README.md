@@ -81,7 +81,13 @@ Suppose we want to save all customers. Then our config json will look like:
     config.dbTable = "shema.table";
     ...
 
-It is very important to understand that "limit" parameter determines the "n" number for INSERT statements of each TRANSACTION.
+##### About the table
+
+sri2postgres assumes that the schema.table you set in config follows this structure:
+
+    CREATE TABLE table (key uuid unique,value jsonb);
+
+It is also very important to understand that "limit" parameter determines the "n" number for INSERT statements of each TRANSACTION.
 If just one INSERT query cannot be done, the whole TRANSACTION (in this 500 resources) will not be saved.
 Once a TRANSACTION is finish the method will ask for the following page to the api ( in this case by asking http://api.mine.org/customers?limit=500&offset=500) until there are no more resource to save.
 Finally it tells you:
@@ -143,6 +149,80 @@ Usage can be:
         sri2postgres.saveResources(filterObject).then(function(result){
             result.resourcesSync
         });
+        
+###saveResourcesInProperty
+
+After calling saveResources() this method will allow you to get the content from a specific property (nested objects).
+We assume this property has as value a link to an api to get a resource.
+
+In the following example we want to obtain the content that engine property points to.
+
+    [
+        {
+            key: uuid-1,
+            brand : 'Ford',
+            model: 'Focus',
+            color: 'RED',
+            engine: 'https://myengine.api.com/engine-uuid-2
+        },
+        {
+            key: uuid-2
+            brand : 'Chevrolet',
+            model: 'Camaro',
+            color: 'YELLOW',
+            engine: 'https://myengine.api.com/engine-uuid-3
+        }
+    ]
+
+Before calling saveResourcesInProperty  we need to tell sri2postgres which attribute and which new table is going to use for this purpose.
+        
+        var propertyConfig = {
+            propertyName : "value->'engine'",
+            targetTable: "schema.engine_table",
+            queriesPerTransaction: 20
+        };
+
+Again a table like this will be required:
+
+    CREATE TABLE engine_table (key uuid unique,value jsonb);
+
+sri2postgres will insert into the targetTable in a Transaction way. So you can set how many insert perform in each transaction.
+Again if just ONE INSERT fails the whole transaction will fail. Fortunately, sri2postgres will abort the current transaction and continue with a new one up to finish.
+
+So this code:
+
+    var propertyConfig = {
+        propertyName : "value->'engine'",
+        targetTable: "schema.car_engine",
+        queriesPerTransaction: 20
+    };
+
+    sri2postgres.saveResources().then(function(){
+    
+        sri2postgres.saveResourcesInProperty(propertyConfig).then(function(result){
+            result.resourcesSync
+            result.resourcesNotSync
+        });
+    });
+
+Will Store:
+
+    CAR
+    +--------------+-------------------------------------------------------------------------------------------------------------------+
+    | key          | value                                                                                                             |
+    +--------------+-------------------------------------------------------------------------------------------------------------------+
+    | uuid-1       | {key: uuid-1,brand : 'Ford',model: 'Focus',color: 'RED',engine: 'https://myengine.api.com/engine-uuid-2}          |
+    | uuid-2       | {key: uuid-2,brand : 'Chevrolet',model: 'Camaro',color: 'YELLOW',engine: 'https://myengine.api.com/engine-uuid-3} |
+    +--------------+-------------------------------------------------------------------------------------------------------------------+
+
+    CAR_ENGINE
+    +--------------+-------------------------------------------------+
+    | key          | value                                           |
+    +--------------+-------------------------------------------------+
+    | uuid-1       | {key: 'engine-uuid-2', type : '1.6', HP: '150'} |
+    | uuid-2       | {key: 'engine-uuid-3', type : '2.0', HP: '200'} |
+    +--------------+-------------------------------------------------+
+    
 
 # Tests
 In order to run tests locally it is needed to install postgres 9.4 or superior in your machine.
@@ -172,19 +252,19 @@ After that you are available to run test doing:
     $ mocha --recursive
     
 and you will see:
-
+    
     Accessing external json Api
-        ✓ should respond to GET (403ms)
+        ✓ should respond to GET (526ms)
         passing null URL
             ✓ throws an error
         with basic auth
-            ✓ should respond OK with valid credentials (355ms)
-            ✓ should return 401 error with invalid username and password (364ms)
+            ✓ should respond OK with valid credentials (360ms)
+            ✓ should return 401 error with invalid username and password (365ms)
     
     sri2postgres save content
         ✓ should throw an error if not table is defined
-        ✓ persist JSON from api to configured postgres table (807ms)
-        ✓ should update the same resource if it is saved again (782ms)
+        ✓ persist JSON from api to configured postgres table (765ms)
+        ✓ should update the same resource if it is saved again (574ms)
     
     Accessing local json Api
         ✓ should respond to GET
@@ -193,5 +273,13 @@ and you will see:
         ✓ should respond with no error
     
     sri2postgres save an array of resources
-        ✓ persist JSON from api to configured postgres table (34780ms)
+        ✓ persist JSON from api to configured postgres table (51263ms)
         ✓ should saved last sync time
+    
+    sri2postgres.saveResources with filter
+        ✓ should persist less resources than sri2postgres.saveResources without filter (61595ms)
+    
+    sri2Postgres read an url property from jsonb 
+        ✓ should save the data content in passed table (219054ms)
+    
+    13 passing (7m)

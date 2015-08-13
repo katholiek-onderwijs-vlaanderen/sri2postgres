@@ -6,7 +6,7 @@ DROP TABLE IF EXISTS "jsonb" CASCADE;
 
 CREATE TABLE "jsonb" (
     "key" uuid unique,
-    "details" jsonb
+    "value" jsonb
 );
 
 DROP SCHEMA IF EXISTS sri2postgres CASCADE;
