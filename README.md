@@ -102,6 +102,47 @@ In addition you can ask the client when last sync was:
 
     sri2postgres.lastSync
 
+### saveResources(customFilter)
+
+sometimes you would like not to save all resources from an api, but someones that apply to one or more conditions.
+In this cases saveResources receives a customFilter object that works like an java interface. It MUST have a method isValid(resource) that return true or false.
+Let's show you an example:
+
+If your resources are cars like:
+
+    [
+        {
+            brand : 'Ford',
+            model: 'Focus',
+            color: 'RED'
+        },
+        {
+            brand : 'Chevrolet',
+            model: 'Camaro',
+            color: 'YELLOW'
+        }
+    ]
+
+And you want to save just RED cars then you have to write your customFilter like:
+
+    function CustomFilter (){
+    
+        this.isValid = function (resource){
+    
+            return resource.color == 'RED';
+        };
+    };
+    
+    module.exports = CustomFilter;
+
+As you KNOW the resource you will be able to write your own filter as complex as you need.
+Usage can be:
+
+        var filterObject = new CustomFilter();
+
+        sri2postgres.saveResources(filterObject).then(function(result){
+            result.resourcesSync
+        });
 
 # Tests
 In order to run tests locally it is needed to install postgres 9.4 or superior in your machine.
