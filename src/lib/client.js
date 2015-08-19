@@ -85,12 +85,14 @@ var insertResources = function(composeObject) {
         //first check if there is a filter
         if (composeObject.filter){
 
-            if ( composeObject.filter.isValid(jsonData.body.results[i]) ){
-                //TODO avoid duplicate code
-                var key = jsonData.body.results[i].$$expanded.key;
-                var stringifiedJson = JSON.stringify(jsonData.body.results[i].$$expanded);
-                stringifiedJson = stringifiedJson.replaceAll("'", "''");
-                insertQuery  = "INSERT INTO "+this.Client.dbTable+" VALUES ('"+key+"','"+stringifiedJson+"')";
+            var resource = jsonData.body.results[i];
+
+            if ( composeObject.filter.isValid(resource) ){
+
+                var key = composeObject.filter.getKeyFrom(resource);
+                var value = JSON.stringify(composeObject.filter.getValueFrom(resource));
+                value = value.replaceAll("'", "''");
+                insertQuery  = "INSERT INTO "+this.Client.dbTable+" VALUES ('"+key+"','"+value+"')";
                 tx.query(insertQuery);
                 inserted++;
             }

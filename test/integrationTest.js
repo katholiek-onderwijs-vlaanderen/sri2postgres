@@ -17,6 +17,8 @@ var databaseHelper = new DatabaseHelper(config);
 
 describe('sri2postgres save content',function(){
 
+    this.timeout(0);
+
     //VERY important adding done parameter to make async function wait
     before(function(done){
         var creationQuery = "CREATE SCHEMA sri2postgres AUTHORIZATION "+config.dbUser+"; SET search_path TO sri2postgres; DROP TABLE IF EXISTS jsonb CASCADE; CREATE TABLE jsonb (key uuid unique,details jsonb);";

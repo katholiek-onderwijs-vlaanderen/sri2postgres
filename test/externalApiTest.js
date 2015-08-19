@@ -11,6 +11,8 @@ var createSri2PostgresInstance = function (config) {
 
 describe('Accessing external json Api', function() {
 
+    this.timeout(0);
+
     describe('passing null URL', function(){
 
         it('throws an error', function(){
@@ -33,8 +35,6 @@ describe('Accessing external json Api', function() {
             done();
         });
     });
-
-
 
     describe('with basic auth',function(){
 

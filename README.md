@@ -118,11 +118,13 @@ If your resources are cars like:
 
     [
         {
+            key: uuid-1,
             brand : 'Ford',
             model: 'Focus',
             color: 'RED'
         },
         {
+            key: uuid-2,
             brand : 'Chevrolet',
             model: 'Camaro',
             color: 'YELLOW'
@@ -136,6 +138,14 @@ And you want to save just RED cars then you have to write your customFilter like
         this.isValid = function (resource){
     
             return resource.color == 'RED';
+        };
+        
+        this.getKeyFrom = function(resource){
+            return resource.key;
+        };
+    
+        this.getValueFrom = function (resource) {
+            return resource;
         };
     };
     

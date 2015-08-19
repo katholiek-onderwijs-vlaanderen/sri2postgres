@@ -24,12 +24,13 @@ describe('sri2Postgres read an url property from jsonb ', function(){
     //save one by one its data into a new table.
     //assert new table is full filled.
 
-    config.baseApiUrl = "https://vsko-content-api.herokuapp.com";
-    config.functionApiUrl = "/content?limit=500";
+    config.baseApiUrl = "https://vsko-content-api-test.herokuapp.com";
+    config.functionApiUrl = "/content?limit=100";
     config.dbTable = 'sri2postgres.jsonb';
     var sri2postgres = new Client(config);
 
     before(function(done) {
+
         var creationQuery = "CREATE SCHEMA sri2postgres AUTHORIZATION " + config.dbUser + "; SET search_path TO sri2postgres; " +
             "DROP TABLE IF EXISTS jsonb CASCADE; CREATE TABLE jsonb (key uuid unique,value jsonb);" +
             "DROP TABLE IF EXISTS jsonb_content_as_text CASCADE; CREATE TABLE jsonb_content_as_text (key uuid unique,value text);";

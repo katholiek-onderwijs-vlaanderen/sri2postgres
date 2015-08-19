@@ -19,14 +19,14 @@ var databaseHelper = new DatabaseHelper(config);
 
 describe('sri2postgres.saveResources with filter',function(){
 
-    config.baseApiUrl = "https://vsko-content-api.herokuapp.com";
-    config.functionApiUrl = "/content?limit=500";
+    config.baseApiUrl = "https://vsko-content-api-test.herokuapp.com";
+    config.functionApiUrl = "/content?limit=100";
     config.dbTable = 'sri2postgres.jsonb';
     var sri2postgres = new Client(config);
     var syncResourcesWithoutFilter = 0;
 
     before(function(done) {
-        var creationQuery = "CREATE SCHEMA sri2postgres AUTHORIZATION " + config.dbUser + "; SET search_path TO sri2postgres; DROP TABLE IF EXISTS jsonb CASCADE; CREATE TABLE jsonb (key uuid unique,details jsonb);";
+        var creationQuery = "CREATE SCHEMA sri2postgres AUTHORIZATION " + config.dbUser + "; SET search_path TO sri2postgres; DROP TABLE IF EXISTS jsonb CASCADE; CREATE TABLE jsonb (key uuid unique,value jsonb);";
         databaseHelper.executeQuery(creationQuery,done);
     });
 
@@ -50,7 +50,7 @@ describe('sri2postgres.saveResources with filter',function(){
         var filterObject = new CustomFilter();
 
         //we have to tell sri2postgres to start over
-        sri2postgres.functionApiUrl = "/content?limit=500";
+        sri2postgres.functionApiUrl = "/content?limit=100";
 
         sri2postgres.saveResources(filterObject).then(function(result){
 

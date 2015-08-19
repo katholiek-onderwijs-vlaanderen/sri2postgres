@@ -6,5 +6,6 @@
   "database": "postgres",
   "dbPort": "5432",
   "dbHost": "localhost",
-  "dbSsl": false
+  "dbSsl": false,
+  "credentials" : { "username": "change_me", "password": "change_me" }
 }
