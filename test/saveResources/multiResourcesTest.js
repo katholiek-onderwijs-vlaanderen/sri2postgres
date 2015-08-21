@@ -46,9 +46,13 @@ describe('sri2postgres save an array of resources',function(){
         this.timeout(0);
 
         sri2postgres.connect(function () {
-            sri2postgres.saveResources().then(function(result){
-                expect(resourcesCount).to.equal(result.resourcesSync+result.resourcesNotSync);
-                done();
+
+            sri2postgres.deleteFromTable({targetTable: config.dbTable}).then(function(){
+
+                sri2postgres.saveResources().then(function(result){
+                    expect(resourcesCount).to.equal(result.resourcesSync+result.resourcesNotSync);
+                    done();
+                });
             });
         });
     });

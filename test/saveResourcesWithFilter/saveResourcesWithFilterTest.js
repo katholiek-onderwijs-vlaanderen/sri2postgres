@@ -52,10 +52,11 @@ describe('sri2postgres.saveResources with filter',function(){
         //we have to tell sri2postgres to start over
         sri2postgres.functionApiUrl = "/content?limit=100";
 
-        sri2postgres.saveResources(filterObject).then(function(result){
-
-            expect(syncResourcesWithoutFilter).to.be.above(result.resourcesSync);
-            done();
+        sri2postgres.deleteFromTable({targetTable: config.dbTable}).then(function(){
+            sri2postgres.saveResources(filterObject).then(function(result){
+                expect(syncResourcesWithoutFilter).to.be.above(result.resourcesSync);
+                done();
+            });
         });
     });
 

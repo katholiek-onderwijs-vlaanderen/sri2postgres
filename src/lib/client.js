@@ -231,9 +231,9 @@ Client.prototype.saveResources = function(filter,callback){
     totalNotSync = 0;
     var clientCopy = this;
 
-    function recurse(filter) {
+    function recurse(filter,client) {
 
-        this.Client.getApiContent().then(function(jsonData){
+        client.getApiContent().then(function(jsonData){
 
             var composeObject = {filter: filter,jsonData: jsonData};
             return insertResources(composeObject);
@@ -241,27 +241,19 @@ Client.prototype.saveResources = function(filter,callback){
         }).then(function(nextPage){
 
             if (typeof nextPage == 'undefined'){
-                this.Client.updateDateSync();
+                client.updateDateSync();
 
                 deferred.resolve({resourcesSync: totalSync,resourcesNotSync: totalNotSync });
             }else{
-                this.Client.functionApiUrl = nextPage;
-                recurse(filter);
+                client.functionApiUrl = nextPage;
+                recurse(filter,client);
             }
         }).fail(function(error){
             deferred.reject(error);
         });
     }
 
-
-    this.deleteFromTable({targetTable:this.dbTable})
-        .then(function(){
-            this.Client = clientCopy;
-            recurse(filter);
-        })
-        .fail(function(error){
-            deferred.reject(new Error(error));
-        });
+    recurse(filter,clientCopy);
 
     deferred.promise.nodeify(callback);
     return deferred.promise;
