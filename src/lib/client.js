@@ -90,7 +90,7 @@ var insertResources = function(composeObject) {
             if ( composeObject.filter.isValid(resource) ){
 
                 var key = composeObject.filter.getKeyFrom(resource);
-                var value = JSON.stringify(composeObject.filter.getValueFrom(resource));
+                var value = composeObject.filter.getValueFrom(resource);
                 value = value.replaceAll("'", "''");
                 insertQuery  = "INSERT INTO "+this.Client.dbTable+" VALUES ('"+key+"','"+value+"')";
                 tx.query(insertQuery);
@@ -344,6 +344,8 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
     });
 
     stream.on('end',function(){
+
+        //TODO review async calls with the last element. 'end' event is being called first that the last 'data' event
         tx.commit(function(){
             resourcesSync += resourcesSyncInActualTransaction;
             deferred.resolve({resourcesSync: resourcesSync, resourcesNotSync: count-resourcesSync});

@@ -131,7 +131,7 @@ If your resources are cars like:
         }
     ]
 
-And you want to save just RED cars then you have to write your customFilter like:
+And you want to save just RED cars then you have to write your customFilter with, at least, this 3 mandatory methods:
 
     function CustomFilter (){
     
@@ -145,7 +145,10 @@ And you want to save just RED cars then you have to write your customFilter like
         };
     
         this.getValueFrom = function (resource) {
-            return resource;
+        
+            // As I know that 'resource' is a JSON object I need to stringify it to be persisted on DB
+            
+            return JSON.stringify(resource);
         };
     };
     
