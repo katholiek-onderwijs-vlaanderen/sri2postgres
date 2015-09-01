@@ -18,7 +18,7 @@ function Client (config) {
     }
 
     this.baseApiUrl = config.baseApiUrl;
-    this.functionApiUrl = config.functionApiUrl
+    this.functionApiUrl = config.functionApiUrl;
     this.apiCredentials = config.credentials;
 
     this.dbUser = config.dbUser;
@@ -59,7 +59,7 @@ String.prototype.replaceAll = function(search, replace) {
         return this.toString();
     }
     return this.split(search).join(replace);
-}
+};
 
 var insertResources = function(composeObject) {
 
@@ -74,7 +74,7 @@ var insertResources = function(composeObject) {
     var errorFound = false;
     var insertQuery;
 
-    tx.on('error', function(error){
+    tx.on('error', function(){
         errorFound = true;
     });
 
@@ -317,7 +317,9 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
 
         sri2PostgresClient.getApiContent().then(function(response){
 
-            if (response.body.length > 0 && !response.body instanceof Buffer ){
+            var isBuffer = (response.body instanceof Buffer);
+
+            if (response.body.length > 0 && !isBuffer){
 
                 var data = response.body.replaceAll("'", "''");
                 var insertQuery  = "INSERT INTO "+sri2PostgresClient.propertyConfig.targetTable+" VALUES ('"+chunk.key+"','"+data+"')";
