@@ -317,7 +317,7 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
 
         sri2PostgresClient.getApiContent().then(function(response){
 
-            if (response.body.length > 0 ){
+            if (response.body.length > 0 && response.body.indexOf('<Buffer') == -1 ){
 
                 var data = response.body.replaceAll("'", "''");
                 var insertQuery  = "INSERT INTO "+sri2PostgresClient.propertyConfig.targetTable+" VALUES ('"+chunk.key+"','"+data+"')";
