@@ -235,8 +235,17 @@ Client.prototype.saveResources = function(filter,callback){
 
         client.getApiContent().then(function(jsonData){
 
-            var composeObject = {filter: filter,jsonData: jsonData};
-            return insertResources(composeObject);
+            if (typeof  jsonData.body.results == 'undefined'){
+
+                console.warn("Retry operation for: " + client.baseApiUrl+client.functionApiUrl);
+                return Q.fcall(function () {
+                    return client.functionApiUrl;
+                });
+
+            }else{
+                var composeObject = {filter: filter,jsonData: jsonData};
+                return insertResources(composeObject);
+            }
 
         }).then(function(nextPage){
 
