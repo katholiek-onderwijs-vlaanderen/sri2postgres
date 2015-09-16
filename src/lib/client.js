@@ -361,6 +361,10 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
                     console.log("readFromTable :: avoid inserting " +chunk.key);
                     stream.resume();
                 }
+            }).fail(function(getApiContentError){
+                console.log("readFromTable :: ERROR getApiContentError for " +chunk.key);
+                console.log(getApiContentError);
+                stream.resume();
             });
         });
 
