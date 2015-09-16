@@ -276,10 +276,14 @@ Client.prototype.deleteFromTable = function(propertyConfig){
     var clientInstance = this;
 
     var deletionQuery = "DELETE FROM "+propertyConfig.targetTable;
+    console.log("deleteFromTable :: Started");
     this.postgresClient.query(deletionQuery, function (err) {
+        console.log("deleteFromTable :: end");
         if (err) {
+            console.log("deleteFromTable :: ERROR " + err);
             deferred.reject(new Error(err));
         }else{
+            console.log("deleteFromTable :: SUCCESS");
             clientInstance.propertyConfig = propertyConfig;
             deferred.resolve(clientInstance);
         }
@@ -302,7 +306,11 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
         ssl: sri2PostgresClient.dbSsl
     });
 
+    console.log("readFromTable :: Connecting to database");
+
     database.connect(function(error){
+
+        console.log("readFromTable :: Successfully Connected to database");
 
         if (error){
             console.log("ERROR in readFromTable: " + error);
@@ -320,17 +328,19 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
 
             stream.pause();
             count++;
-            console.log("Asking content_as_text for: " + chunk.link);
+            console.log("readFromTable :: Asking content_as_text for: " + chunk.link);
             sri2PostgresClient.baseApiUrl = chunk.link;
             sri2PostgresClient.functionApiUrl = '';
 
             sri2PostgresClient.getApiContent().then(function(response){
 
-                console.log("Obtained content_as_text for: " +response);
+                console.log("readFromTable :: Obtained content_as_text for: " +response);
 
                 var isBuffer = (response.body instanceof Buffer);
 
                 if (response.body.length > 0 && !isBuffer){
+
+                    console.log("readFromTable :: preparing INSERT for " +chunk.key);
 
                     var data = response.body.replaceAll("'", "''");
                     var insertQuery  = "INSERT INTO "+sri2PostgresClient.propertyConfig.targetTable+" VALUES ('"+chunk.key+"',E'"+data+"')";
@@ -338,20 +348,24 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
 
                     database.query(insertQuery,function(queryError,response){
 
+
                         if (queryError){
-                            console.error(queryError);
+                            console.log("readFromTable :: ERROR INSERTING "+chunk.key+ ": "+queryError);
+                        }else{
+                            console.log("readFromTable :: INSERT SUCCESSFULLY for " +chunk.key);
                         }
                         resourcesSync += resourcesSyncInActualTransaction;
                         stream.resume();
                     });
                 }else{
+                    console.log("readFromTable :: avoid inserting " +chunk.key);
                     stream.resume();
                 }
             });
         });
 
         stream.on('end',function(){
-
+            console.log("readFromTable :: end stream");
             //TODO review async calls with the last element. 'end' event is being called first that the last 'data' event
             deferred.resolve({resourcesSync: resourcesSync, resourcesNotSync: count-resourcesSync});
         });
@@ -364,6 +378,7 @@ Client.prototype.saveResourcesInProperty = function(propertyConfig,callback){
 
     var deferred = Q.defer();
 
+    console.log("saveResourcesInProperty :: Started");
     // Delete all content from new database
     this.deleteFromTable(propertyConfig)
         .then(this.readFromTable)
