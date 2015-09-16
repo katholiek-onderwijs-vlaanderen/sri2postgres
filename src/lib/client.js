@@ -292,73 +292,64 @@ Client.prototype.deleteFromTable = function(propertyConfig){
 Client.prototype.readFromTable = function(sri2PostgresClient){
 
     var deferred = Q.defer();
-    var sqlQuery = "SELECT key, "+sri2PostgresClient.propertyConfig.propertyName+" AS link FROM "+sri2PostgresClient.dbTable+" WHERE 1000000 = $1 ";
-    var query = new QueryStream(sqlQuery, [1000000]);
-    var stream = sri2PostgresClient.postgresClient.query(query);
-    var count = 0;
-    var resourcesSync = 0;
-    var resourcesSyncInActualTransaction = 0;
 
-    var tx = new Transaction(sri2PostgresClient.postgresClient);
-    tx.begin();
-
-    tx.on('error',function(error){
-        stream.pause();
-
-        tx.abort();
-        tx.begin();
-
-        console.log("TRANSACTION ERROR: "+error+ ". "+resourcesSyncInActualTransaction+" resources will be discouraged");
-
-        resourcesSyncInActualTransaction = 0;
-
-        stream.resume();
-
+    var database = new pg.Client({
+        user: sri2PostgresClient.dbUser,
+        password: sri2PostgresClient.dbPassword,
+        database: sri2PostgresClient.database,
+        port: sri2PostgresClient.dbPort,
+        host: sri2PostgresClient.dbHost,
+        ssl: sri2PostgresClient.dbSsl
     });
 
-    stream.on('data',function(chunk){
+    database.connect(function(error){
 
-        stream.pause();
-        count++;
+        if (error){
+            return deferred.reject(error);
+        }
 
-        sri2PostgresClient.baseApiUrl = chunk.link;
-        sri2PostgresClient.functionApiUrl = '';
+        var sqlQuery = "SELECT key, "+sri2PostgresClient.propertyConfig.propertyName+" AS link FROM "+sri2PostgresClient.dbTable+" WHERE 1000000 = $1 ";
+        var query = new QueryStream(sqlQuery, [1000000]);
+        var stream = sri2PostgresClient.postgresClient.query(query);
+        var count = 0;
+        var resourcesSync = 0;
+        var resourcesSyncInActualTransaction = 0;
 
-        sri2PostgresClient.getApiContent().then(function(response){
+        stream.on('data',function(chunk){
 
-            var isBuffer = (response.body instanceof Buffer);
+            stream.pause();
+            count++;
 
-            if (response.body.length > 0 && !isBuffer){
+            sri2PostgresClient.baseApiUrl = chunk.link;
+            sri2PostgresClient.functionApiUrl = '';
 
-                var data = response.body.replaceAll("'", "''");
-                var insertQuery  = "INSERT INTO "+sri2PostgresClient.propertyConfig.targetTable+" VALUES ('"+chunk.key+"','"+data+"')";
-                resourcesSyncInActualTransaction++;
+            sri2PostgresClient.getApiContent().then(function(response){
 
-                tx.query(insertQuery);
+                var isBuffer = (response.body instanceof Buffer);
 
-                if (count % sri2PostgresClient.propertyConfig.queriesPerTransaction == 0){
+                if (response.body.length > 0 && !isBuffer){
 
-                    tx.commit(function(){
-                        tx.begin();
+                    var data = response.body.replaceAll("'", "''");
+                    var insertQuery  = "INSERT INTO "+sri2PostgresClient.propertyConfig.targetTable+" VALUES ('"+chunk.key+"',E'"+data+"')";
+                    resourcesSyncInActualTransaction++;
+
+                    database.query(insertQuery,function(queryError,response){
+
+                        if (queryError){
+                            console.error(queryError);
+                        }
                         resourcesSync += resourcesSyncInActualTransaction;
-                        resourcesSyncInActualTransaction = 0;
                         stream.resume();
                     });
                 }else{
                     stream.resume();
                 }
-
-            }else{
-                stream.resume();
-            }
+            });
         });
-    });
 
-    stream.on('end',function(){
+        stream.on('end',function(){
 
-        //TODO review async calls with the last element. 'end' event is being called first that the last 'data' event
-        tx.commit(function(){
-            resourcesSync += resourcesSyncInActualTransaction;
+            //TODO review async calls with the last element. 'end' event is being called first that the last 'data' event
             deferred.resolve({resourcesSync: resourcesSync, resourcesNotSync: count-resourcesSync});
         });
     });
