@@ -305,6 +305,7 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
     database.connect(function(error){
 
         if (error){
+            console.log("ERROR in readFromTable: " + error);
             return deferred.reject(error);
         }
 
@@ -319,11 +320,13 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
 
             stream.pause();
             count++;
-
+            console.log("Asking content_as_text for: " + chunk.link);
             sri2PostgresClient.baseApiUrl = chunk.link;
             sri2PostgresClient.functionApiUrl = '';
 
             sri2PostgresClient.getApiContent().then(function(response){
+
+                console.log("Obtained content_as_text for: " +response);
 
                 var isBuffer = (response.body instanceof Buffer);
 
