@@ -29,8 +29,9 @@ function Client (config) {
     this.dbSsl = config.hasOwnProperty('dbSsl') ? config.dbSsl : false;
     this.dbTable = config.dbTable;
 
-    this.lastSync = null;
+    this.apiTimeOut = config.hasOwnProperty('apiTimeOut') ? config.apiTimeOut : 0;
 
+    this.lastSync = null;
     this.postgresClient = null;
 
     this.createPostgresClient = function(){
@@ -207,6 +208,8 @@ Client.prototype.getApiContent = function(next) {
 
     var clientCopy = this;
 
+    this.credentials.open_timeout = this.apiTimeOut;
+
     // Implementing a wrapper to convert getApiContent in a Q Promise
     needle.get(this.baseApiUrl+this.functionApiUrl,this.apiCredentials, function (error,response) {
         if (error) {
@@ -262,6 +265,7 @@ Client.prototype.saveResources = function(filter,callback){
         });
     }
 
+    console.log("Calling saveResources");
     recurse(filter,clientCopy);
 
     deferred.promise.nodeify(callback);
