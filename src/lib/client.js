@@ -208,7 +208,7 @@ Client.prototype.getApiContent = function(next) {
 
     var clientCopy = this;
 
-    this.credentials.open_timeout = this.apiTimeOut;
+    this.apiCredentials.open_timeout = this.apiTimeOut;
 
     // Implementing a wrapper to convert getApiContent in a Q Promise
     needle.get(this.baseApiUrl+this.functionApiUrl,this.apiCredentials, function (error,response) {
