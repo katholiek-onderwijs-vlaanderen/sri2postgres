@@ -362,7 +362,8 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
                         stream.resume();
                     });
                 }else{
-                    console.log("readFromTable :: avoid inserting " +chunk.key);
+                    console.log("readFromTable :: AVOID inserting " +chunk.key);
+                    console.log("response.body.length: " + response.body.length + " - isBuffer: " + isBuffer );
                     stream.resume();
                 }
             }).fail(function(getApiContentError){
