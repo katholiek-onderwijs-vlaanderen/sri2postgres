@@ -19,7 +19,8 @@
     "pg": "2.x",
     "q": "1.4.x",
     "pg-transaction": "1.0.x",
-    "pg-query-stream": "~0.7.0"
+    "pg-query-stream": "~0.7.0",
+    "retry":"~0.7.0"
   },
   "repository": {
     "type": "git",

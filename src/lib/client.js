@@ -7,6 +7,7 @@ var pg = require('pg');
 var Q = require('q');
 var Transaction = require('pg-transaction');
 var QueryStream = require('pg-query-stream');
+var retry = require('retry');
 
 // Constructor
 function Client (config) {
@@ -19,7 +20,8 @@ function Client (config) {
 
     this.baseApiUrl = config.baseApiUrl;
     this.functionApiUrl = config.functionApiUrl;
-    this.apiCredentials = config.credentials;
+    this.apiCredentials = config.hasOwnProperty('credentials') ? config.credentials : {};
+    this.apiRetries = config.hasOwnProperty('apiRetries') ? config.apiRetries : 2;
 
     this.dbUser = config.dbUser;
     this.dbPassword = config.dbPassword;
@@ -205,21 +207,32 @@ Client.prototype.saveResource = function(table,callback) {
 Client.prototype.getApiContent = function(next) {
 
     var deferred = Q.defer();
-
-    var clientCopy = this;
+    var operation = retry.operation({retries: this.apiRetries});
+    var self = this;
 
     this.apiCredentials.open_timeout = this.apiTimeOut;
 
-    // Implementing a wrapper to convert getApiContent in a Q Promise
-    needle.get(this.baseApiUrl+this.functionApiUrl,this.apiCredentials, function (error,response) {
-        if (error) {
-            deferred.reject(new Error(error));
-        } else {
+
+    operation.attempt(function(attempt){
+
+        if(attempt > 1){
+            console.log("getApiContent retry attempt: "+attempt);
+        }
+
+        needle.get(self.baseApiUrl+self.functionApiUrl,self.apiCredentials, function (error,response) {
+
+            if (operation.retry(error)) {
+                return;
+            }
+
+            if (error) {
+                return deferred.reject(operation.mainError());
+            }
 
             //Doing this bind to keep Client instance reference.
-            this.Client = clientCopy;
+            this.Client = self;
             deferred.resolve(response);
-        }
+        });
     });
 
     deferred.promise.nodeify(next);

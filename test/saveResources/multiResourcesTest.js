@@ -19,8 +19,10 @@ var databaseHelper = new DatabaseHelper(config);
 
 describe('sri2postgres save an array of resources',function(){
 
+    var offset = 106300;
+
     config.baseApiUrl = "https://vsko-content-api-test.herokuapp.com";
-    config.functionApiUrl = "/content?limit=100";
+    config.functionApiUrl = "/content?limit=100&offset="+offset;
     config.dbTable = 'sri2postgres.jsonb';
     var sri2postgres = new Client(config);
     var resourcesCount = 0;
@@ -36,7 +38,7 @@ describe('sri2postgres save an array of resources',function(){
         this.timeout(0);
 
         sri2postgres.getApiContent().then(function(result){
-            resourcesCount = result.body.$$meta.count;
+            resourcesCount = Number(result.body.$$meta.count) - Number(offset);
             done();
         });
 
