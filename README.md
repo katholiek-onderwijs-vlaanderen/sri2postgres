@@ -191,16 +191,14 @@ Before calling saveResourcesInProperty  we need to tell sri2postgres which attri
         
         var propertyConfig = {
             propertyName : "value->'engine'",
-            targetTable: "schema.engine_table",
-            queriesPerTransaction: 20
+            targetTable: "schema.engine_table"
         };
 
 Again a table like this will be required:
 
     CREATE TABLE engine_table (key uuid unique,value jsonb);
 
-sri2postgres will insert into the targetTable in a Transaction way. So you can set how many insert perform in each transaction.
-Again if just ONE INSERT fails the whole transaction will fail. Fortunately, sri2postgres will abort the current transaction and continue with a new one up to finish.
+sri2postgres will insert it one by one.
 
 So this code:
 
@@ -211,6 +209,10 @@ So this code:
     };
 
     sri2postgres.saveResources().then(function(){
+    
+        // As engine has its own api, we must set baseApiUrl to blank.
+        // Remember that sri2postgres will construct the full api url by doing: url = baseApiUrl + functionApiUrl
+        sri2postgres.baseApiUrl = '';
     
         sri2postgres.saveResourcesInProperty(propertyConfig).then(function(result){
             result.resourcesSync
