@@ -30,6 +30,7 @@ function Client (config) {
     this.dbHost = config.dbHost;
     this.dbSsl = config.hasOwnProperty('dbSsl') ? config.dbSsl : false;
     this.dbTable = config.dbTable;
+    this.resourceType = config.hasOwnProperty('resourceType') ? config.resourceType : 'DOCUMENT';
 
     this.apiTimeOut = config.hasOwnProperty('apiTimeOut') ? config.apiTimeOut : 0;
 
@@ -95,7 +96,7 @@ var insertResources = function(composeObject) {
                 var key = composeObject.filter.getKeyFrom(resource);
                 var value = composeObject.filter.getValueFrom(resource);
                 value = value.replaceAll("'", "''");
-                insertQuery  = "INSERT INTO "+this.Client.dbTable+" VALUES ('"+key+"','"+value+"')";
+                insertQuery  = "INSERT INTO "+this.Client.dbTable+" VALUES ('"+key+"','"+value+"','"+this.Client.resourceType+"')";
                 tx.query(insertQuery);
                 inserted++;
             }
@@ -104,7 +105,7 @@ var insertResources = function(composeObject) {
             var key = jsonData.body.results[i].$$expanded.key;
             var stringifiedJson = JSON.stringify(jsonData.body.results[i].$$expanded);
             stringifiedJson = stringifiedJson.replaceAll("'", "''");
-            insertQuery  = "INSERT INTO "+this.Client.dbTable+" VALUES ('"+key+"','"+stringifiedJson+"')";
+            insertQuery  = "INSERT INTO "+this.Client.dbTable+" VALUES ('"+key+"','"+stringifiedJson+"','"+this.Client.resourceType+"')";
             tx.query(insertQuery);
             inserted++;
         }
