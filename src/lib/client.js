@@ -30,7 +30,7 @@ function Client (config) {
     this.dbHost = config.dbHost;
     this.dbSsl = config.hasOwnProperty('dbSsl') ? config.dbSsl : false;
     this.dbTable = config.dbTable;
-    this.resourceType = config.hasOwnProperty('resourceType') ? config.resourceType : 'DOCUMENT';
+    this.resourceType = config.hasOwnProperty('resourceType') ? config.resourceType : 'document';
 
     this.apiTimeOut = config.hasOwnProperty('apiTimeOut') ? config.apiTimeOut : 0;
 
@@ -339,7 +339,7 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
         var limit = sri2PostgresClient.propertyConfig.hasOwnProperty('limit') ? sri2PostgresClient.propertyConfig.limit : 1000000;
 
         //var sqlQuery = "SELECT key, "+sri2PostgresClient.propertyConfig.propertyName+" AS link FROM "+sri2PostgresClient.dbTable+" WHERE 1000000 = $1 ";
-        var sqlQuery = "SELECT key, "+sri2PostgresClient.propertyConfig.propertyName+" AS link FROM "+sri2PostgresClient.dbTable+" ORDER BY key LIMIT $1 OFFSET "+offset;
+        var sqlQuery = "SELECT key, "+sri2PostgresClient.propertyConfig.propertyName+" AS link FROM "+sri2PostgresClient.dbTable+" WHERE type = '"+sri2PostgresClient.resourceType+"' ORDER BY key LIMIT $1 OFFSET "+offset;
         var query = new QueryStream(sqlQuery, [limit]);
         var stream = sri2PostgresClient.postgresClient.query(query);
         var count = 0;
@@ -361,7 +361,7 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
 
                 if (response.body.length > 0 && !isBuffer){
 
-                    console.log("SRI2POSTGRES: readFromTable :: preparing INSERT for " +chunk.key);
+                    console.log("SRI2POSTGRES: readFromTable ["+count+"] :: preparing INSERT for " +chunk.key);
 
                     var data = response.body.replaceAll("'", "''");
                     var insertQuery  = "INSERT INTO "+sri2PostgresClient.propertyConfig.targetTable+" VALUES ('"+chunk.key+"',E'"+data+"')";
@@ -373,7 +373,7 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
                         if (queryError){
                             console.log("SRI2POSTGRES: readFromTable :: ERROR INSERTING "+chunk.key+ ": "+queryError);
                         }else{
-                            console.log("SRI2POSTGRES: readFromTable :: INSERT SUCCESSFULLY for " +chunk.key);
+                            console.log("SRI2POSTGRES: readFromTable ::  INSERT SUCCESSFULLY for " +chunk.key);
                         }
                         resourcesSync += resourcesSyncInActualTransaction;
                         stream.resume();
