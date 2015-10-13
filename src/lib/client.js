@@ -335,8 +335,12 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
             return deferred.reject(error);
         }
 
-        var sqlQuery = "SELECT key, "+sri2PostgresClient.propertyConfig.propertyName+" AS link FROM "+sri2PostgresClient.dbTable+" WHERE 1000000 = $1 ";
-        var query = new QueryStream(sqlQuery, [1000000]);
+        var offset = sri2PostgresClient.propertyConfig.hasOwnProperty('offset') ? sri2PostgresClient.propertyConfig.offset : 0;
+        var limit = sri2PostgresClient.propertyConfig.hasOwnProperty('limit') ? sri2PostgresClient.propertyConfig.limit : 1000000;
+
+        //var sqlQuery = "SELECT key, "+sri2PostgresClient.propertyConfig.propertyName+" AS link FROM "+sri2PostgresClient.dbTable+" WHERE 1000000 = $1 ";
+        var sqlQuery = "SELECT key, "+sri2PostgresClient.propertyConfig.propertyName+" AS link FROM "+sri2PostgresClient.dbTable+" ORDER BY key LIMIT $1 OFFSET "+offset;
+        var query = new QueryStream(sqlQuery, [limit]);
         var stream = sri2PostgresClient.postgresClient.query(query);
         var count = 0;
         var resourcesSync = 0;
