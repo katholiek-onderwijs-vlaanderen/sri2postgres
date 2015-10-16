@@ -217,7 +217,7 @@ Client.prototype.getApiContent = function(next) {
     operation.attempt(function(attempt){
 
         if(attempt > 1){
-            console.log("getApiContent retry attempt: "+attempt);
+            console.log("getApiContent retry attempt: "+attempt+ " for: "+self.baseApiUrl+self.functionApiUrl);
         }
 
         needle.get(self.baseApiUrl+self.functionApiUrl,self.apiCredentials, function (error,response) {
@@ -339,6 +339,10 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
         var limit = sri2PostgresClient.propertyConfig.hasOwnProperty('limit') ? sri2PostgresClient.propertyConfig.limit : 1000000;
 
         //var sqlQuery = "SELECT key, "+sri2PostgresClient.propertyConfig.propertyName+" AS link FROM "+sri2PostgresClient.dbTable+" WHERE 1000000 = $1 ";
+
+
+        //TODO attachment->type = 'CONTENT_AS_TEXT'
+
         var sqlQuery = "SELECT key, "+sri2PostgresClient.propertyConfig.propertyName+" AS link FROM "+sri2PostgresClient.dbTable+" WHERE type = '"+sri2PostgresClient.resourceType+"' ORDER BY key LIMIT $1 OFFSET "+offset;
         var query = new QueryStream(sqlQuery, [limit]);
         var stream = sri2PostgresClient.postgresClient.query(query);
