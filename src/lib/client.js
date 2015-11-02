@@ -220,7 +220,7 @@ Client.prototype.getApiContent = function(next) {
             console.log("getApiContent retry attempt: "+attempt+ " for: "+self.baseApiUrl+self.functionApiUrl);
         }
 
-        needle.get(self.baseApiUrl+self.functionApiUrl,self.apiCredentials, function (error,response) {
+        needle.get(encodeURI(self.baseApiUrl+self.functionApiUrl),self.apiCredentials, function (error,response) {
 
             if (operation.retry(error)) {
                 return;
@@ -309,7 +309,6 @@ Client.prototype.deleteFromTable = function(propertyConfig){
 
     return deferred.promise;
 };
-
 
 Client.prototype.readFromTable = function(sri2PostgresClient){
 
