@@ -32,6 +32,9 @@ function Client (config) {
     this.dbTable = config.dbTable;
     this.resourceType = config.hasOwnProperty('resourceType') ? config.resourceType : 'document';
 
+    this.encodeURL = config.hasOwnProperty('encodeURL') ? config.encodeURL : true;
+
+
     this.apiTimeOut = config.hasOwnProperty('apiTimeOut') ? config.apiTimeOut : 0;
 
     this.lastSync = null;
@@ -205,6 +208,18 @@ Client.prototype.saveResource = function(table,callback) {
     return deferred.promise;
 };
 
+Client.prototype.getURL = function(){
+
+    var url = this.baseApiUrl+this.functionApiUrl;
+
+    if ( this.encodeURL ){
+        url =  encodeURI(url);
+    }
+
+    return url;
+};
+
+
 Client.prototype.getApiContent = function(next) {
 
     var deferred = Q.defer();
@@ -220,7 +235,7 @@ Client.prototype.getApiContent = function(next) {
             console.log("getApiContent retry attempt: "+attempt+ " for: "+self.baseApiUrl+self.functionApiUrl);
         }
 
-        needle.get(encodeURI(self.baseApiUrl+self.functionApiUrl),self.apiCredentials, function (error,response) {
+        needle.get(self.getURL(),self.apiCredentials, function (error,response) {
 
             if (operation.retry(error)) {
                 return;
