@@ -358,34 +358,52 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
 
             sri2PostgresClient.getApiContent().then(function(response){
 
-                console.log("SRI2POSTGRES: readFromTable :: Obtained content_as_text for: " +response);
+                console.log("SRI2POSTGRES: readFromTable :: Obtained content_as_text for: " + chunk.link);
 
-                var isBuffer = (response.body instanceof Buffer);
+                if (response.statusCode == 200 ){
 
-                if (response.body.length > 0 && !isBuffer){
+                    var isBuffer = (response.body instanceof Buffer);
 
-                    console.log("SRI2POSTGRES: readFromTable ["+count+"] :: preparing INSERT for " +chunk.key);
+                    if (response.body.length > 0 && !isBuffer){
 
-                    var data = response.body.replaceAll("'", "''");
-                    var insertQuery  = "INSERT INTO "+sri2PostgresClient.propertyConfig.targetTable+" VALUES ('"+chunk.key+"',E'"+data+"')";
-                    resourcesSyncInActualTransaction++;
-
-                    database.query(insertQuery,function(queryError){
+                        console.log("SRI2POSTGRES: readFromTable ["+count+"] :: preparing INSERT for " +chunk.key);
 
 
-                        if (queryError){
-                            console.log("SRI2POSTGRES: readFromTable :: ERROR INSERTING "+chunk.key+ ": "+queryError);
-                        }else{
-                            console.log("SRI2POSTGRES: readFromTable ::  INSERT SUCCESSFULLY for " +chunk.key);
+                        //Check FOUND redirect Data
+                        if ( response.body.indexOf("Found. Redirecting to https://testapi.vsko.be/content/") > -1){
+                            console.log("--------------------------------------");
+                            console.log(response.statusCode);
+                            console.log(response.headers);
+                            console.log("--------------------------------------");
                         }
-                        resourcesSync += resourcesSyncInActualTransaction;
+
+
+                        var data = response.body.replaceAll("'", "''");
+                        var insertQuery  = "INSERT INTO "+sri2PostgresClient.propertyConfig.targetTable+" VALUES ('"+chunk.key+"',E'"+data+"')";
+                        resourcesSyncInActualTransaction++;
+
+                        database.query(insertQuery,function(queryError){
+
+                            if (queryError){
+                                console.error("SRI2POSTGRES: readFromTable :: ERROR INSERTING "+chunk.key+ ": "+queryError);
+                            }else{
+                                console.log("SRI2POSTGRES: readFromTable ::  INSERT SUCCESSFULLY for " +chunk.key);
+                            }
+                            resourcesSync += resourcesSyncInActualTransaction;
+                            stream.resume();
+                        });
+                    }else{
+                        console.warn("SRI2POSTGRES: readFromTable :: AVOID inserting " +chunk.key);
+                        console.warn("SRI2POSTGRES: response.body.length: " + response.body.length + " - isBuffer: " + isBuffer );
                         stream.resume();
-                    });
+                    }
                 }else{
-                    console.log("SRI2POSTGRES: readFromTable :: AVOID inserting " +chunk.key);
-                    console.log("SRI2POSTGRES: response.body.length: " + response.body.length + " - isBuffer: " + isBuffer );
+                    //statusCode != 200 => Error
+                    console.error("SRI2POSTGRES: readFromTable :: ERROR getting " + chunk.link + "statusCode: " + response.statusCode);
+                    console.error(response.headers);
                     stream.resume();
                 }
+
             }).fail(function(getApiContentError){
                 console.log("SRI2POSTGRES: readFromTable :: ERROR getApiContentError for " +chunk.key);
                 console.log(getApiContentError);
