@@ -237,7 +237,7 @@ Client.prototype.getApiContent = function(next) {
 
         needle.get(self.getURL(),self.apiCredentials, function (error,response) {
 
-            if (operation.retry(error)) {
+            if (operation.retry(error) || response.statusCode == 302) {
                 return;
             }
 
@@ -338,14 +338,14 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
         ssl: sri2PostgresClient.dbSsl
     });
 
-    console.log("SRI2POSTGRES: readFromTable :: Connecting to database");
+    //console.log("SRI2POSTGRES: readFromTable :: Connecting to database");
 
     database.connect(function(error){
 
-        console.log("SRI2POSTGRES: readFromTable :: Successfully Connected to database");
+        //console.log("SRI2POSTGRES: readFromTable :: Successfully Connected to database");
 
         if (error){
-            console.log("SRI2POSTGRES: ERROR in readFromTable: " + error);
+            //console.log("SRI2POSTGRES: ERROR in readFromTable: " + error);
             return deferred.reject(error);
         }
 
@@ -368,12 +368,12 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
 
             stream.pause();
             count++;
-            console.log("SRI2POSTGRES: readFromTable :: Asking content_as_text for: " + chunk.link);
+            //console.log("SRI2POSTGRES: readFromTable :: Asking content_as_text for: " + chunk.link);
             sri2PostgresClient.functionApiUrl = chunk.link;
 
             sri2PostgresClient.getApiContent().then(function(response){
 
-                console.log("SRI2POSTGRES: readFromTable :: Obtained content_as_text for: " + chunk.link);
+                //console.log("SRI2POSTGRES: readFromTable :: Obtained content_as_text for: " + chunk.link);
 
                 if (response.statusCode == 200 ){
 
@@ -381,17 +381,7 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
 
                     if (response.body.length > 0 && !isBuffer){
 
-                        console.log("SRI2POSTGRES: readFromTable ["+count+"] :: preparing INSERT for " +chunk.key);
-
-
-                        //Check FOUND redirect Data
-                        if ( response.body.indexOf("Found. Redirecting to https://testapi.vsko.be/content/") > -1){
-                            console.log("--------------------------------------");
-                            console.log(response.statusCode);
-                            console.log(response.headers);
-                            console.log("--------------------------------------");
-                        }
-
+                        //console.log("SRI2POSTGRES: readFromTable ["+count+"] :: preparing INSERT for " +chunk.key);
 
                         var data = response.body.replaceAll("'", "''");
                         var insertQuery  = "INSERT INTO "+sri2PostgresClient.propertyConfig.targetTable+" VALUES ('"+chunk.key+"',E'"+data+"')";
@@ -400,22 +390,26 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
                         database.query(insertQuery,function(queryError){
 
                             if (queryError){
-                                console.error("SRI2POSTGRES: readFromTable :: ERROR INSERTING "+chunk.key+ ": "+queryError);
+                                //console.error("SRI2POSTGRES: readFromTable :: ERROR INSERTING "+chunk.key+ ": "+queryError);
                             }else{
-                                console.log("SRI2POSTGRES: readFromTable ::  INSERT SUCCESSFULLY for " +chunk.key);
+                                console.log("SRI2POSTGRES: readFromTable :: ["+count+"]  INSERT SUCCESSFULLY for " +chunk.key);
                             }
                             resourcesSync += resourcesSyncInActualTransaction;
                             stream.resume();
                         });
                     }else{
-                        console.warn("SRI2POSTGRES: readFromTable :: AVOID inserting " +chunk.key);
-                        console.warn("SRI2POSTGRES: response.body.length: " + response.body.length + " - isBuffer: " + isBuffer );
+                        //console.warn("SRI2POSTGRES: readFromTable :: AVOID inserting " +chunk.key);
+                        //console.warn("SRI2POSTGRES: response.body.length: " + response.body.length + " - isBuffer: " + isBuffer );
                         stream.resume();
                     }
                 }else{
                     //statusCode != 200 => Error
-                    console.error("SRI2POSTGRES: readFromTable :: ERROR getting " + chunk.link + "statusCode: " + response.statusCode);
-                    console.error(response.headers);
+                    if (response.statusCode == 302){
+                        console.log("################");
+                        console.error(response.headers);
+                        console.log("****************");
+                    }
+                    //console.error("SRI2POSTGRES: readFromTable :: ERROR getting " + chunk.link + "statusCode: " + response.statusCode);
                     stream.resume();
                 }
 
