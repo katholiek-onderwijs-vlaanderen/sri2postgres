@@ -352,12 +352,12 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
         var offset = sri2PostgresClient.propertyConfig.hasOwnProperty('offset') ? sri2PostgresClient.propertyConfig.offset : 0;
         var limit = sri2PostgresClient.propertyConfig.hasOwnProperty('limit') ? sri2PostgresClient.propertyConfig.limit : 1000000;
 
-        //var sqlQuery = "SELECT key, "+sri2PostgresClient.propertyConfig.propertyName+" AS link FROM "+sri2PostgresClient.dbTable+" WHERE 1000000 = $1 ";
+        // SELECT key, obj->>'href' as link FROM jsonb, jsonb_array_elements(value->'attachments') obj WHERE type = 'curriculumzill' AND obj->>'type' = 'CONTENT_AS_TEXT' ORDER BY key LIMIT 5000 OFFSET 0
 
-
-        //TODO attachment->type = 'CONTENT_AS_TEXT'
-
-        var sqlQuery = "SELECT key, "+sri2PostgresClient.propertyConfig.propertyName+" AS link FROM "+sri2PostgresClient.dbTable+" WHERE type = '"+sri2PostgresClient.resourceType+"' ORDER BY key LIMIT $1 OFFSET "+offset;
+        var sqlQuery = "SELECT key, "+sri2PostgresClient.propertyConfig.propertyName+" AS link";
+        sqlQuery += " FROM "+sri2PostgresClient.dbTable+" "+sri2PostgresClient.propertyConfig.fromExtraConditions;
+        sqlQuery += " WHERE type = '"+sri2PostgresClient.resourceType+"' "+sri2PostgresClient.propertyConfig.whereExtraConditions;
+        sqlQuery += " ORDER BY key LIMIT $1 OFFSET "+offset;
         var query = new QueryStream(sqlQuery, [limit]);
         var stream = sri2PostgresClient.postgresClient.query(query);
         var count = 0;
