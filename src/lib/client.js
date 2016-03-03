@@ -237,7 +237,7 @@ Client.prototype.getApiContent = function(next) {
 
         needle.get(self.getURL(),self.apiCredentials, function (error,response) {
 
-            if (operation.retry(error) || response.statusCode == 302) {
+            if (operation.retry(error)) {
                 return;
             }
 
