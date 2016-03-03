@@ -404,13 +404,18 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
                     }
                 }else{
                     //statusCode != 200 => Error
-                    if (response.statusCode == 302){
-                        console.log("################");
-                        console.error(response.headers);
-                        console.log("****************");
-                    }
-                    //console.error("SRI2POSTGRES: readFromTable :: ERROR getting " + chunk.link + "statusCode: " + response.statusCode);
-                    stream.resume();
+                    var errorInsertQuery  = "INSERT INTO content_as_text_errors VALUES ('"+chunk.key+"','"+chunk.link+"',"+response.statusCode+",'"+response.statusMessage+"')";                    database.query(errorInsertQuery,function(queryError){
+
+                        if (queryError){
+                            console.error(response.statusMessage + " " +response.statusCode);
+                            console.error(response.headers);
+                            console.error(chunk.key);
+                            console.error(chunk.link);
+                            console.error("--*--");
+                        }
+
+                        stream.resume();
+                    });
                 }
 
             }).fail(function(getApiContentError){
