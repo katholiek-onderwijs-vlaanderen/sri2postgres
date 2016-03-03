@@ -325,6 +325,23 @@ Client.prototype.deleteFromTable = function(propertyConfig){
     return deferred.promise;
 };
 
+var saveError = function (key,link,code,message,database){
+    var deferred = Q.defer();
+
+    var errorInsertQuery  = "INSERT INTO content_as_text_errors VALUES ('"+key+"','"+link+"','"+code+"','"+message+"')";
+    database.query(errorInsertQuery,function(queryError){
+        if (queryError){
+            console.error(message + " " +code);
+            console.error(key);
+            console.error(link);
+            console.error("--*--");
+        }
+        deferred.resolve();
+    });
+
+    return deferred.promise;
+};
+
 Client.prototype.readFromTable = function(sri2PostgresClient){
 
     var deferred = Q.defer();
@@ -404,24 +421,17 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
                     }
                 }else{
                     //statusCode != 200 => Error
-                    var errorInsertQuery  = "INSERT INTO content_as_text_errors VALUES ('"+chunk.key+"','"+chunk.link+"',"+response.statusCode+",'"+response.statusMessage+"')";                    database.query(errorInsertQuery,function(queryError){
-
-                        if (queryError){
-                            console.error(response.statusMessage + " " +response.statusCode);
-                            console.error(response.headers);
-                            console.error(chunk.key);
-                            console.error(chunk.link);
-                            console.error("--*--");
-                        }
-
-                        stream.resume();
-                    });
+                    saveError(chunk.key,chunk.link,response.statusCode,response.statusMessage,database)
+                        .then(function(){
+                            stream.resume();
+                        });
                 }
 
             }).fail(function(getApiContentError){
-                console.log("SRI2POSTGRES: readFromTable :: ERROR getApiContentError for " +chunk.key);
-                console.log(getApiContentError);
-                stream.resume();
+                saveError(chunk.key,chunk.link,getApiContentError.code,getApiContentError.message,database)
+                    .then(function(){
+                        stream.resume();
+                    });
             });
         });
 
