@@ -407,7 +407,7 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
                         database.query(insertQuery,function(queryError){
 
                             if (queryError){
-                                //console.error("SRI2POSTGRES: readFromTable :: ERROR INSERTING "+chunk.key+ ": "+queryError);
+                                saveError(chunk.key,chunk.link,0,insertQuery,database);
                             }else{
                                 console.log("SRI2POSTGRES: readFromTable :: ["+count+"]  INSERT SUCCESSFULLY for " +chunk.key);
                             }
@@ -415,9 +415,12 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
                             stream.resume();
                         });
                     }else{
-                        //console.warn("SRI2POSTGRES: readFromTable :: AVOID inserting " +chunk.key);
-                        //console.warn("SRI2POSTGRES: response.body.length: " + response.body.length + " - isBuffer: " + isBuffer );
-                        stream.resume();
+
+                        var message = isBuffer ? 'response.body instanceof Buffer' : 'response.body is empty';
+                        saveError(chunk.key,chunk.link,response.statusCode,message,database)
+                            .then(function(){
+                                stream.resume();
+                            });
                     }
                 }else{
                     //statusCode != 200 => Error
