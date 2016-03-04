@@ -385,8 +385,14 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
 
             stream.pause();
             count++;
-            //console.log("SRI2POSTGRES: readFromTable :: Asking content_as_text for: " + chunk.link);
-            sri2PostgresClient.functionApiUrl = chunk.link;
+
+            var originalLink = chunk.link;
+            var res = originalLink.split("/");
+            var sourceName = res[res.length-1];
+            sourceName = encodeURIComponent(sourceName);
+            var componentUrl = "/" + res[1] + "/" +res[2] + "/" + sourceName;
+
+            sri2PostgresClient.functionApiUrl = componentUrl;
 
             sri2PostgresClient.getApiContent().then(function(response){
 
@@ -407,7 +413,7 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
                         database.query(insertQuery,function(queryError){
 
                             if (queryError){
-                                saveError(chunk.key,chunk.link,0,insertQuery,database);
+                                saveError(chunk.key,chunk.link,0,queryError.message,database);
                             }else{
                                 console.log("SRI2POSTGRES: readFromTable :: ["+count+"]  INSERT SUCCESSFULLY for " +chunk.key);
                             }
