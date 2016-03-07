@@ -31,6 +31,7 @@ function Client (config) {
     this.dbSsl = config.hasOwnProperty('dbSsl') ? config.dbSsl : false;
     this.dbTable = config.dbTable;
     this.resourceType = config.hasOwnProperty('resourceType') ? config.resourceType : 'document';
+    this.requiredByRoot = config.hasOwnProperty('requiredByRoot') ? config.requiredByRoot : undefined;
 
     this.encodeURL = config.hasOwnProperty('encodeURL') ? config.encodeURL : true;
 
@@ -102,6 +103,11 @@ var insertResources = function(composeObject) {
                 insertQuery  = "INSERT INTO "+this.Client.dbTable+" VALUES ('"+key+"','"+value+"','"+this.Client.resourceType+"')";
                 tx.query(insertQuery);
                 inserted++;
+
+                if (typeof this.Client.requiredByRoot != 'undefined' ){
+                    var insertRootQuery  = "INSERT INTO "+this.Client.requiredByRoot.table+" VALUES ('"+key+"','"+this.Client.requiredByRoot.key+"','"+this.Client.resourceType+"')";
+                    tx.query(insertRootQuery);
+                }
             }
         }else{
             //process all of them
@@ -111,6 +117,11 @@ var insertResources = function(composeObject) {
             insertQuery  = "INSERT INTO "+this.Client.dbTable+" VALUES ('"+key+"','"+stringifiedJson+"','"+this.Client.resourceType+"')";
             tx.query(insertQuery);
             inserted++;
+
+            if (typeof this.Client.requiredByRoot != 'undefined' ){
+                var insertRootQuery  = "INSERT INTO "+this.Client.requiredByRoot.table+" VALUES ('"+key+"','"+this.Client.requiredByRoot.key+"','"+this.Client.resourceType+"')";
+                tx.query(insertRootQuery);
+            }
         }
 
     }
