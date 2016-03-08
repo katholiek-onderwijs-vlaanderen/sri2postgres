@@ -390,12 +390,22 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
         var stream = sri2PostgresClient.postgresClient.query(query);
         var count = 0;
         var resourcesSync = 0;
-        var resourcesSyncInActualTransaction = 0;
+        var queue = 0;
+
+        function handleStreamFlow(){
+            if (stream.readable){
+                queue--;
+                stream.resume();
+            }else{
+                deferred.resolve({resourcesSync: resourcesSync, resourcesNotSync: count-resourcesSync});
+            }
+        }
 
         stream.on('data',function(chunk){
 
             stream.pause();
             count++;
+            queue++;
 
             var originalLink = chunk.link;
             var res = originalLink.split("/");
@@ -419,46 +429,41 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
 
                         var data = response.body.replaceAll("'", "''");
                         var insertQuery  = "INSERT INTO "+sri2PostgresClient.propertyConfig.targetTable+" VALUES ('"+chunk.key+"',E'"+data+"')";
-                        resourcesSyncInActualTransaction++;
 
                         database.query(insertQuery,function(queryError){
 
                             if (queryError){
                                 saveError(chunk.key,chunk.link,0,queryError.message,database);
                             }else{
-                                console.log("SRI2POSTGRES: readFromTable :: ["+count+"]  INSERT SUCCESSFULLY for " +chunk.key);
+                                resourcesSync++;
+                                console.log("SRI2POSTGRES: readFromTable :: [ "+resourcesSync+"/"+count+" ]  INSERT SUCCESSFULLY for " +chunk.key);
                             }
-                            resourcesSync += resourcesSyncInActualTransaction;
-                            stream.resume();
+
+                            handleStreamFlow();
+
                         });
                     }else{
 
                         var message = isBuffer ? 'response.body instanceof Buffer' : 'response.body is empty';
                         saveError(chunk.key,chunk.link,response.statusCode,message,database)
-                            .then(function(){
-                                stream.resume();
-                            });
+                            .then(handleStreamFlow);
                     }
                 }else{
                     //statusCode != 200 => Error
                     saveError(chunk.key,chunk.link,response.statusCode,response.statusMessage,database)
-                        .then(function(){
-                            stream.resume();
-                        });
+                        .then(handleStreamFlow);
                 }
 
             }).fail(function(getApiContentError){
                 saveError(chunk.key,chunk.link,getApiContentError.code,getApiContentError.message,database)
-                    .then(function(){
-                        stream.resume();
-                    });
+                    .then(handleStreamFlow);
             });
         });
 
         stream.on('end',function(){
-            console.log("SRI2POSTGRES: readFromTable :: end stream");
-            //TODO review async calls with the last element. 'end' event is being called first that the last 'data' event
-            deferred.resolve({resourcesSync: resourcesSync, resourcesNotSync: count-resourcesSync});
+            if (queue == 0){
+                deferred.resolve({resourcesSync: resourcesSync, resourcesNotSync: count-resourcesSync});
+            }
         });
     });
 
