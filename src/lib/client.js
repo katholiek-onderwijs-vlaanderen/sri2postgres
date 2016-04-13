@@ -428,6 +428,10 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
                         //console.log("SRI2POSTGRES: readFromTable ["+count+"] :: preparing INSERT for " +chunk.key);
 
                         var data = response.body.replaceAll("'", "''");
+                        // After replacing ' -> '' there are still cases where \'' brake the query, so
+                        // we need to transform \'' -> '' to correctly insert it.
+                        data = data.replaceAll("\\''", "''");
+
                         var insertQuery  = "INSERT INTO "+sri2PostgresClient.propertyConfig.targetTable+" VALUES ('"+chunk.key+"',E'"+data+"')";
 
                         database.query(insertQuery,function(queryError){
