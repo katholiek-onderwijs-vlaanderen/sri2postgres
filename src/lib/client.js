@@ -29,6 +29,7 @@ function Client (config) {
     this.dbPort = config.dbPort;
     this.dbHost = config.dbHost;
     this.dbSsl = config.hasOwnProperty('dbSsl') ? config.dbSsl : false;
+    this.logging = config.hasOwnProperty('logging') ? config.logging : false;
     this.dbTable = config.dbTable;
     this.resourceType = config.hasOwnProperty('resourceType') ? config.resourceType : 'document';
     this.requiredByRoot = config.hasOwnProperty('requiredByRoot') ? config.requiredByRoot : undefined;
@@ -231,6 +232,15 @@ Client.prototype.getURL = function(){
 };
 
 
+Client.prototype.logMessage = function(message) {
+
+    if ( this.logging ){
+        console.log(message);
+    }
+
+};
+
+
 Client.prototype.getApiContent = function(next) {
 
     var deferred = Q.defer();
@@ -243,7 +253,7 @@ Client.prototype.getApiContent = function(next) {
     operation.attempt(function(attempt){
 
         if(attempt > 1){
-            console.log("getApiContent retry attempt: "+attempt+ " for: "+self.baseApiUrl+self.functionApiUrl);
+            self.logMessage("getApiContent retry attempt: "+attempt+ " for: "+self.baseApiUrl+self.functionApiUrl);
         }
 
         needle.get(self.getURL(),self.apiCredentials, function (error,response) {
@@ -278,9 +288,10 @@ Client.prototype.saveResources = function(filter,callback){
 
         client.getApiContent().then(function(jsonData){
 
-            if (typeof  jsonData.body.results == 'undefined'){
+            if (jsonData.body.results === undefined){
 
-                console.warn("SRI2POSTGRES: Retry operation for: " + client.baseApiUrl+client.functionApiUrl);
+                client.logMessage("SRI2POSTGRES: Retry operation for: " + client.baseApiUrl+client.functionApiUrl);
+
                 return Q.fcall(function () {
                     return client.functionApiUrl;
                 });
@@ -305,7 +316,7 @@ Client.prototype.saveResources = function(filter,callback){
         });
     }
 
-    console.log("SRI2POSTGRES: calling saveResources");
+    this.logMessage("SRI2POSTGRES: calling saveResources");
     recurse(filter,clientCopy);
 
     deferred.promise.nodeify(callback);
@@ -320,14 +331,20 @@ Client.prototype.deleteFromTable = function(propertyConfig){
     var clientInstance = this;
 
     var deletionQuery = "DELETE FROM "+propertyConfig.targetTable;
-    console.log("SRI2POSTGRES: deleteFromTable :: Started");
+
+    this.logMessage("SRI2POSTGRES: deleteFromTable :: Started");
+
     this.postgresClient.query(deletionQuery, function (err) {
-        console.log("SRI2POSTGRES: deleteFromTable :: end");
+
+        clientInstance.logMessage("SRI2POSTGRES: deleteFromTable :: end");
+
         if (err) {
-            console.log("SRI2POSTGRES: deleteFromTable :: ERROR " + err);
+            clientInstance.logMessage("SRI2POSTGRES: deleteFromTable :: ERROR " + err);
             deferred.reject(new Error(err));
         }else{
-            console.log("SRI2POSTGRES: deleteFromTable :: SUCCESS");
+
+            clientInstance.logMessage("SRI2POSTGRES: deleteFromTable :: SUCCESS");
+
             clientInstance.propertyConfig = propertyConfig;
             deferred.resolve(clientInstance);
         }
@@ -440,7 +457,7 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
                                 saveError(chunk.key,chunk.link,0,queryError.message,database);
                             }else{
                                 resourcesSync++;
-                                console.log("SRI2POSTGRES: readFromTable :: [ "+resourcesSync+"/"+count+" ]  INSERT SUCCESSFULLY for " +chunk.key);
+                                sri2PostgresClient.logMessage("SRI2POSTGRES: readFromTable :: [ "+resourcesSync+"/"+count+" ]  INSERT SUCCESSFULLY for " +chunk.key);
                             }
 
                             handleStreamFlow();
@@ -478,7 +495,7 @@ Client.prototype.saveResourcesInProperty = function(propertyConfig,callback){
 
     var deferred = Q.defer();
 
-    console.log("SRI2POSTGRES: saveResourcesInProperty :: Started");
+    this.logMessage("SRI2POSTGRES: saveResourcesInProperty :: Started");
     // Delete all content from new database
     this.deleteFromTable(propertyConfig)
         .then(this.readFromTable)
@@ -496,7 +513,7 @@ Client.prototype.saveResourcesInPropertyWithoutTableDeletion = function(property
 
     var deferred = Q.defer();
 
-    console.log("SRI2POSTGRES: saveResourcesInPropertyWithoutTableDeletion :: Started");
+    this.logMessage("SRI2POSTGRES: saveResourcesInPropertyWithoutTableDeletion :: Started");
 
     this.propertyConfig = propertyConfig;
 
