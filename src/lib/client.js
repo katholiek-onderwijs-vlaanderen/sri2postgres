@@ -288,14 +288,9 @@ Client.prototype.saveResources = function(filter,callback){
 
         client.getApiContent().then(function(jsonData){
 
-            if (jsonData.body.results === undefined){
-
-                client.logMessage("SRI2POSTGRES: Retry operation for: " + client.baseApiUrl+client.functionApiUrl);
-
-                return Q.fcall(function () {
-                    return client.functionApiUrl;
-                });
-
+            if (jsonData.statusCode != 200){
+                client.logMessage("SRI2POSTGRES: Error "+jsonData.statusCode+" when getting: " + client.baseApiUrl+client.functionApiUrl + " | Error Message: " + jsonData.statusMessage);
+                deferred.reject(jsonData.statusMessage);
             }else{
                 var composeObject = {filter: filter,jsonData: jsonData};
                 return insertResources(composeObject);
@@ -303,9 +298,8 @@ Client.prototype.saveResources = function(filter,callback){
 
         }).then(function(nextPage){
 
-            if (typeof nextPage == 'undefined'){
+            if (nextPage === undefined){
                 client.updateDateSync();
-
                 deferred.resolve({resourcesSync: totalSync,resourcesNotSync: totalNotSync });
             }else{
                 client.functionApiUrl = nextPage;
