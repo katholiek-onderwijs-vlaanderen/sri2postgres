@@ -324,7 +324,7 @@ Client.prototype.deleteFromTable = function(propertyConfig){
 
     var clientInstance = this;
 
-    var deletionQuery = "DELETE FROM "+propertyConfig.targetTable;
+    var deletionQuery = "DELETE FROM "+propertyConfig.targetTable+ " WHERE type = '"+clientInstance.resourceType+"'";
 
     this.logMessage("SRI2POSTGRES: deleteFromTable :: Started");
 
@@ -443,7 +443,7 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
                         // we need to transform \'' -> '' to correctly insert it.
                         data = data.replaceAll("\\''", "''");
 
-                        var insertQuery  = "INSERT INTO "+sri2PostgresClient.propertyConfig.targetTable+" VALUES ('"+chunk.key+"',E'"+data+"')";
+                        var insertQuery  = "INSERT INTO "+sri2PostgresClient.propertyConfig.targetTable+" VALUES ('"+chunk.key+"',E'"+data+"','"+sri2PostgresClient.resourceType+"')";
 
                         database.query(insertQuery,function(queryError){
 
@@ -490,7 +490,6 @@ Client.prototype.saveResourcesInProperty = function(propertyConfig,callback){
     var deferred = Q.defer();
 
     this.logMessage("SRI2POSTGRES: saveResourcesInProperty :: Started");
-    // Delete all content from new database
     this.deleteFromTable(propertyConfig)
         .then(this.readFromTable)
         .then(function(response){
