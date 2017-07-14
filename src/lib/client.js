@@ -300,12 +300,14 @@ Client.prototype.saveResources = function(filter,callback){
 
             if (nextPage === undefined){
                 client.updateDateSync();
+                clientCopy.postgresClient.end();
                 deferred.resolve({resourcesSync: totalSync,resourcesNotSync: totalNotSync });
             }else{
                 client.functionApiUrl = nextPage;
                 recurse(filter,client);
             }
         }).fail(function(error){
+            clientCopy.postgresClient.end();
             deferred.reject(error);
         });
     }
@@ -408,6 +410,7 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
                 queue--;
                 stream.resume();
             }else{
+                database.end();
                 deferred.resolve({resourcesSync: resourcesSync, resourcesNotSync: count-resourcesSync});
             }
         }
@@ -477,6 +480,7 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
 
         stream.on('end',function(){
             if (queue == 0){
+                database.end();
                 deferred.resolve({resourcesSync: resourcesSync, resourcesNotSync: count-resourcesSync});
             }
         });
@@ -489,12 +493,16 @@ Client.prototype.saveResourcesInProperty = function(propertyConfig,callback){
 
     var deferred = Q.defer();
 
+    var self = this;
+
     this.logMessage("SRI2POSTGRES: saveResourcesInProperty :: Started");
     this.deleteFromTable(propertyConfig)
         .then(this.readFromTable)
         .then(function(response){
+            self.postgresClient.end();
             deferred.resolve({resourcesSync: response.resourcesSync, resourcesNotSync: response.resourcesNotSync});
         }).fail(function(error){
+            self.postgresClient.end();
             deferred.reject(error);
         });
 
@@ -509,11 +517,14 @@ Client.prototype.saveResourcesInPropertyWithoutTableDeletion = function(property
     this.logMessage("SRI2POSTGRES: saveResourcesInPropertyWithoutTableDeletion :: Started");
 
     this.propertyConfig = propertyConfig;
+    var self = this;
 
         this.readFromTable(this)
             .then(function(response){
+                self.postgresClient.end();
                 deferred.resolve({resourcesSync: response.resourcesSync, resourcesNotSync: response.resourcesNotSync});
             }).fail(function(error){
+                self.postgresClient.end();
                 deferred.reject(error);
             });
 
