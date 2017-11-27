@@ -383,23 +383,12 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
 
     var deferred = Q.defer();
 
-    var database = new pg.Client({
-        user: sri2PostgresClient.dbUser,
-        password: sri2PostgresClient.dbPassword,
-        database: sri2PostgresClient.database,
-        port: sri2PostgresClient.dbPort,
-        host: sri2PostgresClient.dbHost,
-        ssl: sri2PostgresClient.dbSsl
-    });
+    sri2PostgresClient.logMessage("SRI2POSTGRES: readFromTable :: Connecting to database");
 
-    //console.log("SRI2POSTGRES: readFromTable :: Connecting to database");
-
-    database.connect(function(error){
-
-        //console.log("SRI2POSTGRES: readFromTable :: Successfully Connected to database");
+    pg.connect(sri2PostgresClient.connectionString, function (error, database, done) {
 
         if (error){
-            //console.log("SRI2POSTGRES: ERROR in readFromTable: " + error);
+            sri2PostgresClient.logMessage("SRI2POSTGRES: ERROR in readFromTable: " + error);
             return deferred.reject(error);
         }
 
