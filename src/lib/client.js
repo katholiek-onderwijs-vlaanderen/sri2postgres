@@ -36,11 +36,12 @@ function Client (config) {
 
     this.encodeURL = config.hasOwnProperty('encodeURL') ? config.encodeURL : true;
 
-
     this.apiTimeOut = config.hasOwnProperty('apiTimeOut') ? config.apiTimeOut : 0;
 
     this.lastSync = null;
     this.postgresClient = null;
+
+    this.connectionString = config.hasOwnProperty('connectionString') ? config.connectionString : '';
 
     this.createPostgresClient = function(){
 
@@ -186,13 +187,25 @@ var insertData = function(jsonData) {
 // class methods
 Client.prototype.connect = function(next) {
 
-    if ( this.postgresClient == null){
-        this.createPostgresClient();
-    }
+    if (this.postgresClient == null && this.connectionString != '') {
 
-    this.postgresClient.connect(function(err) {
-        next(err);
-    });
+        var self = this;
+
+        pg.connect(this.connectionString, function (databaseConnectionError, dbClient, done) {
+            self.postgresClient = dbClient;
+            next(databaseConnectionError);
+        });
+
+    }else{
+
+        if ( this.postgresClient == null){
+            this.createPostgresClient();
+        }
+
+        this.postgresClient.connect(function(err) {
+            next(err);
+        });
+    }
 };
 
 //Creating-NodeJS-modules-with-both-promise-and-callback-API-support-using-Q
