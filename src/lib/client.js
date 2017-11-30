@@ -362,11 +362,12 @@ Client.prototype.deleteFromTable = function(propertyConfig){
     return deferred.promise;
 };
 
-var saveError = function (key,link,code,message,database){
+var saveError = function (key,link,code,message,database,table,type){
     var deferred = Q.defer();
 
+    var insertEmptyTextQuery = "INSERT INTO "+table+" VALUES ('"+key+"',E'','"+type+"'); ";
     var errorInsertQuery  = "INSERT INTO content_as_text_errors VALUES ('"+key+"','"+link+"','"+code+"','"+message+"')";
-    database.query(errorInsertQuery,function(queryError){
+    database.query(insertEmptyTextQuery+errorInsertQuery,function(queryError){
         if (queryError){
             console.error(message + " " +code);
             console.error(key);
@@ -453,7 +454,7 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
                         database.query(insertQuery,function(queryError){
 
                             if (queryError){
-                                saveError(chunk.key,chunk.link,0,queryError.message,database);
+                                saveError(chunk.key,chunk.link,0,queryError.message,database,sri2PostgresClient.propertyConfig.targetTable,sri2PostgresClient.resourceType);
                             }else{
                                 resourcesSync++;
                                 sri2PostgresClient.logMessage("SRI2POSTGRES: readFromTable :: [ "+resourcesSync+"/"+count+" ]  INSERT SUCCESSFULLY for " +chunk.key);
@@ -465,17 +466,17 @@ Client.prototype.readFromTable = function(sri2PostgresClient){
                     }else{
 
                         var message = isBuffer ? 'response.body instanceof Buffer' : 'response.body is empty';
-                        saveError(chunk.key,chunk.link,response.statusCode,message,database)
+                        saveError(chunk.key,chunk.link,response.statusCode,message,database,sri2PostgresClient.propertyConfig.targetTable,sri2PostgresClient.resourceType)
                             .then(handleStreamFlow);
                     }
                 }else{
                     //statusCode != 200 => Error
-                    saveError(chunk.key,chunk.link,response.statusCode,response.statusMessage,database)
+                    saveError(chunk.key,chunk.link,response.statusCode,response.statusMessage,database,sri2PostgresClient.propertyConfig.targetTable,sri2PostgresClient.resourceType)
                         .then(handleStreamFlow);
                 }
 
             }).fail(function(getApiContentError){
-                saveError(chunk.key,chunk.link,getApiContentError.code,getApiContentError.message,database)
+                saveError(chunk.key,chunk.link,getApiContentError.code,getApiContentError.message,database,sri2PostgresClient.propertyConfig.targetTable,sri2PostgresClient.resourceType)
                     .then(handleStreamFlow);
             });
         });
