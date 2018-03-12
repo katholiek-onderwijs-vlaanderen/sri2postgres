@@ -4,7 +4,6 @@
 
 const request = require('requestretry');
 var Q = require('q');
-var retry = require('retry');
 
 // Constructor
 function Client (config) {
