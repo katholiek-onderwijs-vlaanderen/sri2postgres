@@ -8,6 +8,7 @@ var Q = require('q');
 var Transaction = require('pg-transaction');
 var QueryStream = require('pg-query-stream');
 var retry = require('retry');
+var sriClient;
 
 // Constructor
 function Client (config) {
@@ -42,6 +43,21 @@ function Client (config) {
     this.postgresClient = null;
 
     this.connectionString = config.hasOwnProperty('connectionString') ? config.connectionString : '';
+
+    this.sriClientParams = config.hasOwnProperty('sriClientParams') ? config.sriClientParams : {};
+    this.sriClientOptions = config.hasOwnProperty('sriClientOptions') ? config.sriClientOptions : {};
+
+    const configuration = {
+        baseUrl: config.baseApiUrl
+    };
+
+    if (this.apiCredentials.username) {
+        configuration.username = this.apiCredentials.username;
+        configuration.passwor = this.apiCredentials.password;
+        configuration.headers = this.apiCredentials.headers;
+    }
+
+    sriClient = require('@kathondvla/sri-client/node-sri-client')(configuration);
 
     this.createPostgresClient = function(){
 
@@ -235,7 +251,7 @@ Client.prototype.saveResource = function(table,callback) {
 
 Client.prototype.getURL = function(){
 
-    var url = this.baseApiUrl+this.functionApiUrl;
+    var url = this.functionApiUrl;
 
     if ( this.encodeURL ){
         url =  encodeURI(url);
@@ -257,33 +273,25 @@ Client.prototype.logMessage = function(message) {
 Client.prototype.getApiContent = function(next) {
 
     var deferred = Q.defer();
-    var operation = retry.operation({retries: this.apiRetries});
     var self = this;
 
-    this.apiCredentials.open_timeout = this.apiTimeOut;
+    sriClient.get(this.getURL(),this.sriClientParams,this.sriClientOptions)
+      .then(function(result){
 
+          this.Client = self;
 
-    operation.attempt(function(attempt){
-
-        if(attempt > 1){
-            self.logMessage("getApiContent retry attempt: "+attempt+ " for: "+self.baseApiUrl+self.functionApiUrl);
-        }
-
-        needle.get(self.getURL(),self.apiCredentials, function (error,response) {
-
-            if (operation.retry(error)) {
-                return;
-            }
-
-            if (error) {
-                return deferred.reject(operation.mainError());
-            }
-
-            //Doing this bind to keep Client instance reference.
-            this.Client = self;
-            deferred.resolve(response);
-        });
-    });
+          var response = {
+              body: result,
+              statusCode: 200
+          };
+          deferred.resolve(response);
+      })
+      .catch(function(error){
+          deferred.reject({
+              statusMessage: error,
+              statusCode: 400
+          });
+      });
 
     deferred.promise.nodeify(next);
     return deferred.promise;
