@@ -53,7 +53,7 @@ function Client (config) {
 
     if (this.apiCredentials.username) {
         configuration.username = this.apiCredentials.username;
-        configuration.passwor = this.apiCredentials.password;
+        configuration.password = this.apiCredentials.password;
         configuration.headers = this.apiCredentials.headers;
     }
 
