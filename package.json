@@ -21,7 +21,7 @@
     "pg-transaction": "1.0.x",
     "pg-query-stream": "~0.7.0",
     "retry": "~0.7.0",
-    "@kathondvla/sri-client": "~1.1.0"
+    "@kathondvla/sri-client": "~1.1.1"
   },
   "repository": {
     "type": "git",
