@@ -55,6 +55,9 @@ function Client (config) {
         configuration.username = this.apiCredentials.username;
         configuration.password = this.apiCredentials.password;
         configuration.headers = this.apiCredentials.headers;
+        if (this.logging) {
+            configuration.logging = 'debug';
+        }
     }
 
     sriClient = require('@kathondvla/sri-client/node-sri-client')(configuration);
@@ -324,6 +327,7 @@ Client.prototype.saveResources = function(filter,callback){
                 clientCopy.postgresClient.end();
                 deferred.resolve({resourcesSync: totalSync,resourcesNotSync: totalNotSync });
             }else{
+                client.logMessage("SRI2POSTGRES: saveResources nextPage: " + nextPage);
                 client.functionApiUrl = nextPage;
                 recurse(filter,client);
             }
