@@ -264,7 +264,7 @@ Client.prototype.saveResources = async function(filter){
         var jsonData;
         try {
             jsonData = await client.getApiContent();
-        } catch {
+        } catch (err) {
             client.logMessage("SRI2POSTGRES: Error "+jsonData.statusCode+" when getting: " + client.baseApiUrl+client.functionApiUrl + " | Error: " );
             console.error(err)
             console.error(err.stack)
