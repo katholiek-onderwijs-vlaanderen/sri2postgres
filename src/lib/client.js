@@ -5,6 +5,7 @@
 const request = require('requestretry');
 var Q = require('q');
 
+
 // Constructor
 function Client (config) {
 
@@ -33,6 +34,7 @@ function Client (config) {
     this.connectionString = config.hasOwnProperty('connectionString') ? config.connectionString : '';
 
     this.postgresClient = config.db;
+    this.apiHeaders = config.headers;
 
     this.updateDateSync = function() {
         this.lastSync = new Date();
