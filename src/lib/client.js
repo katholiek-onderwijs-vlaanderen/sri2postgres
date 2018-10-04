@@ -261,7 +261,16 @@ Client.prototype.saveResources = async function(filter){
     const handlePage = async function(client) {
         "use strict";
 
-        var jsonData = await client.getApiContent()
+        var jsonData;
+        try {
+            jsonData = await client.getApiContent();
+        } catch {
+            client.logMessage("SRI2POSTGRES: Error "+jsonData.statusCode+" when getting: " + client.baseApiUrl+client.functionApiUrl + " | Error: " );
+            console.error(err)
+            console.error(err.stack)
+            throw 'fetch.not.ok'
+        }
+        
 
         if (jsonData.statusCode != 200) {
             client.logMessage("SRI2POSTGRES: Error "+jsonData.statusCode+" when getting: " + client.baseApiUrl+client.functionApiUrl + " | Error Message: " + jsonData.statusMessage);
