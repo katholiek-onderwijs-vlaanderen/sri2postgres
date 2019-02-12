@@ -15,9 +15,11 @@
     "chai-datetime": "1.4.x"
   },
   "dependencies": {
+    "moment": "^2.24.0",
     "pg-promise": "^8.2.2",
     "q": "1.4.x",
-    "requestretry": "^1.13.0"
+    "requestretry": "^1.13.0",
+    "time-stamp": "^2.2.0"
   },
   "repository": {
     "type": "git",

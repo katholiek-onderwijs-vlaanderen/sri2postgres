@@ -4,6 +4,7 @@
 
 const request = require('requestretry');
 const moment = require('moment');
+const io = require('socket.io-client');
 
 
 // Constructor
@@ -320,26 +321,40 @@ Client.prototype.saveResources = async function(){
     return count
 };
 
-Client.prototype.deltaSync = async function(){
 
+Client.prototype.getLastSync = async function() {
     const client = this;
-    let count = 0;
     let lastSync = null;
     try {
         const sql = `SELECT timestamp FROM sri2postgres_last_sync WHERE resource='${client.dbTable}'`
         rows = (await client.postgresClient.result(sql)).rows;
         if (rows.length > 0) {
-            ({ timestamp: lastSync } = rows[0]);
+            const { timestamp: lastSync } = rows[0];
+            return lastSync;
         }
     } catch (err) {
         console.log('ERR: Retrieving last_sync_time failed:')
         console.log(err)
         throw 'retrieving.last.sync.time.failed'
     }
+}
+
+
+
+Client.prototype.deltaSync = async function(lastSync = null) {
+
+    const client = this;
+    let count = 0;
+    let functionApiUrlCpy = null;
+    if (lastSync == null) {
+        lastSync = await client.getLastSync();
+    }
 
     if (lastSync != null) {
+        functionApiUrlCpy = client.functionApiUrl
         client.functionApiUrl += (client.functionApiUrl.includes('?') ? '&' : '?')
                                     + `modifiedSince=${ moment(lastSync).subtract(10, 'seconds').toISOString()}`
+        console.log(client.functionApiUrl)
     } else {
         // do full sync -> delete all resources
         await Client.prototype.deleteResources(client)
@@ -362,6 +377,10 @@ Client.prototype.deltaSync = async function(){
         ({ next, count } = await handlePage(client, count))
     }
 
+    if (functionApiUrlCpy!=null) {
+        client.functionApiUrl = functionApiUrlCpy
+    }
+
     return count
 };
 
@@ -373,6 +392,46 @@ Client.prototype.deleteResources = async function(clientInstance){
     await clientInstance.postgresClient.query(deletionQuery)
     clientInstance.logMessage("SRI2POSTGRES: deleteResources :: SUCCESS");
 };
+
+
+
+
+
+Client.prototype.installBroadcastListeners = async function(db) {
+    const client = this;
+    const broadcastUrl = "https://vsko-audit-broadcast-api-test.herokuapp.com/" // TODO: get this from config?
+
+
+    var socket = io.connect( broadcastUrl );
+
+    socket.on( 'connect', function ( ) {
+        console.log( "CONNECTED" );
+        socket.emit('join', "/persons");
+
+    } );
+
+    socket.on( 'disconnect', function ( ) {
+        console.log( "DISCONNECTED" );
+    } );
+
+    socket.on('update',  async function ( data ) {
+        console.log("New data arrived: " + data);
+        const lastSync = await client.getLastSync();
+
+        if (moment(data.timestamp) > moment(lastSync)) {
+            console.log('Initiating delta sync.')
+            await client.deltaSync(lastSync)
+        } else {
+            console.log('No sync needed.')
+            console.log(data.timestamp)
+            console.log(lastSync)
+        }
+    } );
+
+}
+
+
+
 
 // Client.prototype.deleteFromTable = function(propertyConfig){
 
