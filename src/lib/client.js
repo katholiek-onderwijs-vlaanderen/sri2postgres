@@ -2,9 +2,11 @@
  * Created by pablo on 23/07/15.
  */
 
-const request = require('requestretry');
+// const request = require('requestretry');
 const moment = require('moment');
 const io = require('socket.io-client');
+
+
 
 
 // Constructor
@@ -32,8 +34,19 @@ function Client (config) {
 
     this.connectionString = config.hasOwnProperty('connectionString') ? config.connectionString : '';
 
+    this.expand = config.hasOwnProperty('expand') ? config.expand : [];
+
     this.postgresClient = config.db;
     this.apiHeaders = config.headers;
+
+    const configuration = {
+      baseUrl: this.baseApiUrl,
+      username: this.apiCredentials.username,
+      password: this.apiCredentials.password,
+      headers: this.apiHeaders
+    }
+
+    this.api = require('@kathondvla/sri-client/node-sri-client')(configuration)    
 }
 
 
@@ -193,16 +206,16 @@ var totalNotSync = 0;
 //     return deferred.promise;
 // };
 
-Client.prototype.getURL = function(){
+// Client.prototype.getURL = function(){
 
-    var url = this.baseApiUrl+this.functionApiUrl;
+//     var url = this.baseApiUrl+this.functionApiUrl;
 
-    if ( this.encodeURL ){
-        url =  encodeURI(url);
-    }
+//     if ( this.encodeURL ){
+//         url =  encodeURI(url);
+//     }
 
-    return url;
-};
+//     return url;
+// };
 
 
 Client.prototype.logMessage = function(message) {
@@ -211,11 +224,6 @@ Client.prototype.logMessage = function(message) {
         console.log(message);
     }
 
-};
-
-
-Client.prototype.getApiContent = function() {
-    return request.get({url: this.getURL(), auth: this.apiCredentials, headers: this.apiHeaders, json: true})
 };
 
 
@@ -240,7 +248,8 @@ const handlePage = async function(client, count) {
 
     var jsonData;
     try {
-        jsonData = await client.getApiContent();
+        // jsonData = await client.getApiContent();
+        jsonData = await client.api.getList(client.functionApiUrl, {}, { expand: client.expand });
     } catch (err) {
         client.logMessage("SRI2POSTGRES: Error when getting: " + client.baseApiUrl+client.functionApiUrl + " | Error: " );
         console.error(err)
@@ -248,17 +257,11 @@ const handlePage = async function(client, count) {
         throw 'fetch.not.ok'
     }
     
-
-    if (jsonData.statusCode != 200) {
-        client.logMessage("SRI2POSTGRES: Error "+jsonData.statusCode+" when getting: " + client.baseApiUrl+client.functionApiUrl + " | Error Message: " + jsonData.statusMessage);
-        console.log(jsonData.body)
-        throw 'fetch.not.ok'
-    } else if (jsonData.body.results.length > 0) {
-        
+    if (jsonData.length > 0) {
         var sql = `INSERT INTO ${client.dbTable} VALUES\n`
-            sql += jsonData.body.results.map( e => {
-                            const key = e.$$expanded.key;
-                            const stringifiedJson = JSON.stringify(removeDollarFields(e.$$expanded)).replace(/\'/g, `''`);
+            sql += jsonData.map( e => {
+                            const key = e.key;
+                            const stringifiedJson = JSON.stringify(removeDollarFields(e)).replace(/\'/g, `''`);
                             return `('${key}', '${stringifiedJson}','${client.resourceType}')`
                         }).join(',\n')
             sql += `ON CONFLICT (key) DO UPDATE 
@@ -266,7 +269,7 @@ const handlePage = async function(client, count) {
 
         try {
             const query_reply = await client.postgresClient.result(sql)
-            if (query_reply.rowCount != jsonData.body.results.length) {
+            if (query_reply.rowCount != jsonData.length) {
                 console.log(`\n\nWARNING: INSERT count mismatch !`)    
                 console.log(`for query: ${sql}`)
                 console.log(`${query_reply.rowCount} <-> ${res.body.results.length}\n\n`)
@@ -280,11 +283,11 @@ const handlePage = async function(client, count) {
             process.exit(1)
         }        
     } 
-    count += jsonData.body.results.length
+    count += jsonData.length;
 
-    var nextPage = jsonData.body.$$meta.next;
+    var nextPage = jsonData.next;
     if (nextPage === undefined) {
-        console.log(`NO NEXT PAGE => RETURNING (${client.dbTable})`)
+        console.log(`NO NEXT PAGE => RETURNING (${count}) - ${client.dbTable})`)
         return { next: false, count: count}
     } else {
         console.log(`NEXT PAGE: ${nextPage} (${count}) - (${client.dbTable})`)
@@ -374,7 +377,7 @@ Client.prototype.deltaSync = async function(lastSync = null) {
 
     let next = true
     while (next) {
-        ({ next, count } = await handlePage(client, count))
+        ({ next, count } = await handlePage(client, count));
     }
 
     if (functionApiUrlCpy!=null) {
