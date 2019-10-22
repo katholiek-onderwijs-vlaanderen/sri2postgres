@@ -18,10 +18,15 @@
     "node-uuid": "~1.4.3"
   },
   "dependencies": {
-    "@kathondvla/sri-client": "git+https://github.com/katholiek-onderwijs-vlaanderen/sri-client.git#sprint-193-1",
+    "@kathondvla/sri-client": "git+https://github.com/katholiek-onderwijs-vlaanderen/sri-client.git#sprint-208-0",
+    "json-merge-patch": "0.2.3",
+    "lodash": "4.17.15",
+    "lodash.clonedeep": "4.5.0",
     "moment": "^2.24.0",
     "mssql": "5.1.0",
-    "pg-promise": "^8.2.2",
+    "p-all": "2.1.0",
+    "p-settle": "3.1.0",
+    "pg-promise": "8.7.5",
     "q": "1.4.x",
     "requestretry": "^1.13.0",
     "socket.io-client": "2.2.0",

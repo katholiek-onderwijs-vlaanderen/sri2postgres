@@ -6,8 +6,14 @@
 
 // const request = require('requestretry');
 const moment = require('moment');
+const clonedeep = require('lodash.clonedeep');
 const io = require('socket.io-client');
 const sriClientFactory = require('@kathondvla/sri-client/node-sri-client');
+const SriClientError = require('@kathondvla/sri-client/sri-client-error');
+const pAll = require('p-all');
+const pSettle = require('p-settle');
+const jsonmergepatch = require('json-merge-patch');
+
 
 /** **********************
  *   HELPER FUNCTIONS    *
@@ -24,6 +30,61 @@ const removeDollarFields = (obj) => {
   return obj;
 };
 
+/**
+ * Helper function to compute a hash code from a string as found here:
+ *  https://stackoverflow.com/a/7616484
+ */
+function hashCode(theString) {
+  let hash = 0;
+  let chr;
+  if (theString.length === 0) return hash;
+  for (let i = 0; i < theString.length; i++) {
+    chr = theString.charCodeAt(i);
+    hash = ((hash << 5) - hash) + chr;
+    // eslint-disable-next-line no-bitwise
+    hash |= 0; // Convert to 32bit integer
+  }
+  return hash;
+}
+
+/**
+ * This function will make a few fixes to old api's that weren't fully compliant
+ * to make sure the assumptions we make later on in the code will be valid.
+ *
+ * For example:
+ *  * if a resource doesn't have a key, then we generate a key from the permalink
+ *  * if a resource doesn't have $$meta.modified, then we'll add a default date in there
+ *
+ * @param {object} r
+ */
+function fixResourceForStoring(r) {
+  if (r.$$meta && r.$$meta.modified && r.key) {
+    return r;
+  }
+  retVal = clonedeep(r);
+  if (!(r.$$meta && r.$$meta.modified)) {
+    retVal.$$meta.modified = '2000-01-01';
+  }
+  if (!r.key && r.$$meta && r.$$meta.permalink) {
+    retVal.key = r.$$meta.permalink.substring(r.$$meta.permalink.lastIndexOf('/') + 1);
+  }
+  return retVal;
+}
+
+
+/**
+ * Either adds expand= to the url or replaces the existing expand= with
+ * the given expansion
+ * @param {*} path
+ * @param {*} expansion
+ */
+function setExpandOnPath(path, expansion) {
+  if (path.includes('?') && path.includes('expand=')) {
+    return path.replace(/expand=[^&$]*/, `expand=${expansion}`);
+  }
+
+  return `${path}${path.includes('?') ? '&' : '?'}expand=${expansion}`;
+}
 
 /**
  * @param {Number} nrOfMilliseconds
@@ -43,20 +104,45 @@ const msToOtherUnit = (milliseconds, unit) => {
 };
 
 /**
+ * elapsedTimeCalculations calculates the elapsedMilliseconds given
+ *
+ * @param {Number} startDate obtained with a Date.now() call
+ * @param {String} unit can be ms, s, m, h, d
+ * @param {Number} amount [optional] if present will add avg per second/minute/hour
+ * @param {String} avgUnit [optional] if not set, same unit as above, but you can make it avg per m, h, d, ... if you want
+ * @param {Number} endDate [optional] obtained with a Date.now() call
+ */
+/**
+ *
+ */
+const elapsedTimeCalculations = (startDate, unit = 'ms', amount = false, avgUnit = false, endDate = Date.now()) => {
+  // eslint-disable-next-line no-param-reassign
+  if (!avgUnit) avgUnit = unit;
+  const retVal = {
+    unit, amount, avgUnit, startDate, endDate,
+  };
+  retVal.elapsedMilliseconds = (endDate - startDate);
+  retVal.elapsedInUnit = msToOtherUnit(retVal.elapsedMilliseconds, unit);
+  retVal.elapsedInAvgUnit = msToOtherUnit(retVal.elapsedMilliseconds, avgUnit);
+  retVal.avgPerAvgUnit = amount ? Math.round(amount / retVal.elapsedInAvgUnit) : null;
+  return retVal;
+};
+
+const elapsedTimeCalculationsToString = (calc) => {
+  const avgPerSecondPart = calc.avgPerAvgUnit ? ` (${calc.avgPerAvgUnit}/${calc.avgUnit})` : '';
+  return `${Math.round(calc.elapsedInUnit * 100) / 100}${calc.unit}${avgPerSecondPart}`;
+};
+
+/**
  *
  * @param {Date} startDate
  * @param {String} unit can be ms, s, m, h, d
  * @param {Number} amount [optional] if present will add avg per second/minute/hour
  * @param {String} avgUnit [optional] if not set, same unit as above, but you can make it avg per m, h, d, ... if you want
  */
-const elapsedTimeString = (startDate, unit = 'ms', amount, avgUnit) => {
-  // eslint-disable-next-line no-param-reassign
-  if (!avgUnit) avgUnit = unit;
-  const elapsedMilliseconds = (Date.now() - startDate);
-  const elapsedInUnit = msToOtherUnit(elapsedMilliseconds, unit);
-  const elapsedInAvgUnit = msToOtherUnit(elapsedMilliseconds, avgUnit);
-  const avgPerSecondPart = amount ? ` (${Math.round(amount / elapsedInAvgUnit)}/${avgUnit})` : '';
-  return `${Math.round(elapsedInUnit * 100) / 100}${unit}${avgPerSecondPart}`;
+const elapsedTimeString = (startDate, unit = 'ms', amount = false, avgUnit = false, endDate = Date.now()) => {
+  const calc = elapsedTimeCalculations(startDate, unit, amount, avgUnit, endDate);
+  return elapsedTimeCalculationsToString(calc);
 };
 
 
@@ -108,7 +194,11 @@ function mssqlParameterizeQueryForInsertValues(request, columnNames, parameterNa
  *
  * The helper should support multiple DBs like postgres and mssql.
  */
-const dbFactory = function dbFactory(config) {
+const dbs = {};
+const dbFactory = function dbFactory(configObject = {}) {
+  // make a deep clone so the initialization object cannot be tampered with anymore afterwards
+  const config = clonedeep(configObject);
+
   const mssql = ['mssql'].includes(config.type.toLowerCase()) ? require('mssql') : null;
   const pg = ['pg', 'postgres', 'postgresql'].includes(config.type.toLowerCase()) ? require('pg-promise')({ capSQL: true }) : null;
   if (!mssql && !pg) {
@@ -127,12 +217,18 @@ const dbFactory = function dbFactory(config) {
   const tempTablePrefix = Math.random().toString(26).substring(5);
   const tempTableNameForUpdates = `${mssql ? '##' : ''}sri2db_${tempTablePrefix}_updates`;
   const tempTableNameForDeletes = `${mssql ? '##' : ''}sri2db_${tempTablePrefix}_deletes`;
+  const tempTableNameForSafeDeltaSync = `${mssql ? '##' : ''}sri2db_${tempTablePrefix}_safedeltasync`;
+  const tempTableNameForSafeDeltaSyncInserts = `${mssql ? '##' : ''}sri2db_${tempTablePrefix}_safedeltasyncinserts`;
+
+  function log() { console.log(`[${tempTablePrefix}]`, ...arguments); }
 
   // first we need to know which columns exist in order to execute the right queries
   let initialized = false;
   let baseUrlColumnExists = null;
   let pathColumnExists = null;
   let resourceTypeColumnExists = null;
+  let columnsForUpserts = null; // STRING (will depend on whether baseUrlColumnExists and pathColumnExists)
+  let columnsForDeletes = null; // STRING (will depend on whether baseUrlColumnExists and pathColumnExists)
 
 
   // const sqlSnippets = mssql
@@ -148,17 +244,32 @@ const dbFactory = function dbFactory(config) {
    *
    * @param {*} transaction
    * @param {*} query the query string containing '@paramName' parts for the named params
+   *  and in the case of postgres \${paramName}
    * @param {*} params if mssql: an array of { name: '', type: mssql.VarChar, value: ... }
    *   for postgres the type is not needed
+   * @param {bool} explain if true will run the query prependen with 'explain analyze' first,
+   *   and print the results
    */
-  async function doQuery(transaction, queryString, params = []) {
+  async function doQuery(transaction, queryString, params = [], explain = false) {
+    if (explain && !queryString.trim().toLowerCase().startsWith('explain')) {
+      const results = await doQuery(transaction, `EXPLAIN ${queryString}`, params, false);
+      console.log('\n   # -------- ANALYZING THE FOLLOWING QUERY:\n   #');
+      queryString.split('\n').forEach((r) => {
+        console.log(`   # ${r}`);
+      });
+      results.rows.forEach((r) => {
+        console.log(`   # ${r['QUERY PLAN']}`);
+      });
+      console.log('\n');
+    }
+
     if (mssql) {
       try {
         const request = transaction.request();
         params.forEach(p => request.input(p.name, p.type, p.value));
         const result = await request.query(queryString);
 
-        return result.recordset;
+        return result.recordset || result;
       } catch (e) {
         console.error('Error in doQuery', e);
         throw e;
@@ -168,8 +279,8 @@ const dbFactory = function dbFactory(config) {
         const pgParams = {};
         params.forEach(p => pgParams[p.name] = p.value);
 
-        const result = await transaction.any(queryString, pgParams);
-        return result;
+        const result = await transaction.result(queryString, pgParams);
+        return result.command === 'SELECT' ? result.rows : result;
       } catch (e) {
         console.error('Error in doQuery', e);
         throw e;
@@ -187,6 +298,8 @@ const dbFactory = function dbFactory(config) {
    *  (only the href will do if all api's have their own table, otherwise baseUrl and path might be relevant too)
    * @param {string} tableName
    */
+  let columnSetForDeletes = null;
+  let columnSetForUpdates = null;
   async function doBulkInsert(dbTransaction, records, forDeletion = false, tableName = config.writeTable) {
     if (records && records.length === 0) {
       return 0;
@@ -201,8 +314,8 @@ const dbFactory = function dbFactory(config) {
         const table = new mssql.Table(mssqlTableName);
         table.create = false; // don't try to create the table
         table.columns.add('href', mssql.VarChar(1024), { nullable: false, length: 1024 });
-        if (baseUrlColumnExists) table.columns.add('baseurl', mssql.VarChar(100), { nullable: false, length: 100 });
-        if (pathColumnExists) table.columns.add('path', mssql.VarChar(100), { nullable: false, length: 100 });
+        if (baseUrlColumnExists) table.columns.add('baseurl', mssql.VarChar(1024), { nullable: false, length: 1024 });
+        if (pathColumnExists) table.columns.add('path', mssql.VarChar(1024), { nullable: false, length: 1024 });
 
         if (!forDeletion) {
           table.columns.add('key', mssql.VarChar(100), /* mssql.UniqueIdentifier */ { nullable: false, length: 100 });
@@ -228,7 +341,7 @@ const dbFactory = function dbFactory(config) {
 
             addParams.push(r.key);
             addParams.push(new Date(r.$$meta.modified));
-            addParams.push(JSON.stringify(removeDollarFields(r)));
+            addParams.push(JSON.stringify(r));
             if (resourceTypeColumnExists) addParams.push(r.$$meta.type);
 
             table.rows.add(...addParams);
@@ -248,18 +361,25 @@ const dbFactory = function dbFactory(config) {
     } if (pg) {
       const pgTableName = tableName;
 
-      // our set of columns, to be created only once, and then shared/reused,
-      // to let it cache up its formatting templates for high performance:
-      const columsArray = forDeletion ? ['href'] : ['href', 'key', 'modified', 'jsondata'];
-      if (baseUrlColumnExists) columsArray.push('baseurl');
-      if (pathColumnExists) columsArray.push('path');
+      // generate our set of columns, to be created only once, and then shared/reused,
+      if ((!forDeletion && !columnSetForUpdates) || (forDeletion && !columnSetForDeletes)) {
+        // to let it cache up its formatting templates for high performance:
+        const columsArray = forDeletion ? ['href'] : ['href', 'key', 'modified', 'jsondata'];
+        if (baseUrlColumnExists) columsArray.push('baseurl');
+        if (pathColumnExists) columsArray.push('path');
 
-      if (!forDeletion) {
-        if (resourceTypeColumnExists) columsArray.push('resourcetype');
+        if (!forDeletion) {
+          if (resourceTypeColumnExists) columsArray.push('resourcetype');
+        }
+
+        if (forDeletion) {
+          columnSetForDeletes = new pg.helpers.ColumnSet(columsArray, { table: pgTableName });
+        } else {
+          columnSetForUpdates = new pg.helpers.ColumnSet(columsArray, { table: pgTableName });
+        }
       }
 
-      const columnSet = new pg.helpers.ColumnSet(columsArray, { table: pgTableName });
-      // TODO define columSet outside of the function so it will be reused !!!
+      const columnSet = forDeletion ? columnSetForDeletes : columnSetForUpdates;
 
       // data input values:
       const values = records.map((r) => {
@@ -277,7 +397,7 @@ const dbFactory = function dbFactory(config) {
             href: r.$$meta.permalink,
             key: r.key,
             modified: new Date(r.$$meta.modified),
-            jsondata: JSON.stringify(removeDollarFields(r)),
+            jsondata: JSON.stringify(r),
           };
           if (resourceTypeColumnExists) value.resourcetype = r.$$meta.type;
           if (baseUrlColumnExists) value.baseurl = config.baseUrl;
@@ -295,15 +415,16 @@ const dbFactory = function dbFactory(config) {
       retVal = result.rowCount;
     }
 
-    console.log(`  Inserted ${retVal} rows (${forDeletion ? 'hrefs only' : 'href, resourceType, key, modified, jsonData'}) in ${elapsedTimeString(beforeInsert, 'ms', retVal, 's')}`);
+    console.log(`  [doBulkInsert] Inserted ${retVal} rows (${forDeletion ? columnsForDeletes : columnsForUpserts}) into ${tableName} in ${elapsedTimeString(beforeInsert, 'ms', retVal, 's')}`);
     return retVal;
   }
 
 
   async function getTableColumns(dbTransaction, tableName) {
     if (mssql) {
-      return doQuery(dbTransaction, `
-        select schema_name(tab.schema_id) as schema_name,
+      return doQuery(
+        dbTransaction,
+        `select schema_name(tab.schema_id) as schema_name,
             tab.name as table_name,
             col.column_id,
             col.name as column_name,
@@ -319,11 +440,12 @@ const dbFactory = function dbFactory(config) {
         order by schema_name,
             table_name,
             column_id;
-      `,
-      [
-        { name: 'schemaName', type: mssql.VarChar, value: config.schema },
-        { name: 'tableName', type: mssql.VarChar, value: tableName },
-      ]);
+        `,
+        [
+          { name: 'schemaName', type: mssql.VarChar, value: config.schema },
+          { name: 'tableName', type: mssql.VarChar, value: tableName },
+        ],
+      );
       // eslint-disable-next-line no-else-return
     } else {
       return doQuery(dbTransaction, `
@@ -353,38 +475,40 @@ const dbFactory = function dbFactory(config) {
   /**
    * Get connection from pool and open a transaction on it
    */
-  let poolOrConnection = null;
   async function openTransaction() {
-    if (poolOrConnection) {
-      // do nothing but return the existing pool
-    } else if (mssql) {
-      const mssqlconfig = Object.assign(
-        {
+    const confAsString = `${config.type}|${config.host}|${config.database}|${config.username}|${hashCode(config.password)}`;
+
+    let poolOrConnection = null;
+    if (mssql) {
+      if (!dbs[confAsString]) {
+        const mssqlconfig = {
           server: config.host,
           database: config.database,
           user: config.username,
           password: config.password,
-        },
-        {
           pool: {
             max: 10,
             min: 0,
             idleTimeoutMillis: 30000,
             connectionTimeout: 60 * 60 * 1000, // 1 hour
           },
-          requestTimeout: 30 * 60 * 1000, // 30 minutes
-        },
-      );
+          requestTimeout: 5 * 60 * 1000, // 5 minutes
+        };
 
-      poolOrConnection = new mssql.ConnectionPool(mssqlconfig);
-      poolOrConnection.on('error', (err) => {
-        console.error('connection pool error', err);
-      });
+        poolOrConnection = new mssql.ConnectionPool(mssqlconfig);
+        // poolOrConnection.on('error', (err) => {
+        //   console.error('connection pool error', err);
+        // });
+        await poolOrConnection.connect();
 
-      await poolOrConnection.connect();
+        dbs[confAsString] = poolOrConnection;
+      } else {
+        poolOrConnection = dbs[confAsString];
+      }
     } else if (pg) {
-      const pgconfig = Object.assign(config,
-        {
+      if (!dbs[confAsString]) {
+        const pgconfig = {
+          ...config,
           user: config.username,
           // pool: {
           max: 10,
@@ -393,10 +517,12 @@ const dbFactory = function dbFactory(config) {
           connectionTimeout: 60 * 60 * 1000, // 1 hour
           // },
           capSQL: true, // capitalize all generated SQL
-        });
+        };
 
-      const db = pg(pgconfig);
+        dbs[confAsString] = pg(pgconfig);
+      }
 
+      const db = dbs[confAsString];
       poolOrConnection = await db.connect();
     }
 
@@ -405,16 +531,25 @@ const dbFactory = function dbFactory(config) {
       transaction = poolOrConnection.transaction();
       await transaction.begin();
     } else if (pg) {
+      // await poolOrConnection.none('SET AUTOCOMMIT = OFF');
       await poolOrConnection.none('BEGIN');
       transaction = poolOrConnection;
     }
 
     if (!initialized) {
-      const tableColumns = await getTableColumns(poolOrConnection, config.writeTable);
-      console.log('TableColumns', tableColumns.map(c => c.column_name).join());
+      const tableColumns = await getTableColumns(transaction, config.writeTable);
+      const tableColumnNames = tableColumns.map(c => c.column_name);
+      columnsForUpserts = mssql ? `[${tableColumnNames.join('],[')}]` : tableColumnNames.join();
+      console.log('TableColumns', columnsForUpserts);
       resourceTypeColumnExists = !!tableColumns.find(e => e.column_name.toLowerCase() === 'resourcetype');
       baseUrlColumnExists = !!tableColumns.find(e => e.column_name.toLowerCase() === 'baseurl');
       pathColumnExists = !!tableColumns.find(e => e.column_name.toLowerCase() === 'path');
+
+      const tableColumnNamesForDeletes = ['href'];
+      if (baseUrlColumnExists) tableColumnNamesForDeletes.push('baseurl');
+      if (pathColumnExists) tableColumnNamesForDeletes.push('path');
+      columnsForDeletes = mssql ? `[${tableColumnNamesForDeletes.join('],[')}]` : tableColumnNamesForDeletes.join();
+
       initialized = true;
     }
 
@@ -428,7 +563,10 @@ const dbFactory = function dbFactory(config) {
     if (mssql && transaction) {
       return transaction.commit();
     } if (pg && transaction) {
-      return transaction.none('COMMIT');
+      await transaction.none('COMMIT');
+      await transaction.done();
+      // poolOrConnection = null;
+      return true;
     }
     return 0;
   }
@@ -441,7 +579,9 @@ const dbFactory = function dbFactory(config) {
       return transaction.rollback();
     }
     if (pg) {
-      return transaction.none('ROLLBACK');
+      await transaction.none('ROLLBACK');
+      await transaction.done();
+      return true;
     }
     return 0;
   }
@@ -461,10 +601,11 @@ const dbFactory = function dbFactory(config) {
      * @returns the last sync date from the most recent sync this process has run,
      *   or (on a cold start) null if DB is empty and the most recent 'modified' otherwise
      */
-    getLastSyncDate: async function getLastSyncDate(apiPath) {
+    getLastSyncDate: async function getLastSyncDate(apiPath, transaction = null) {
+      const myTransaction = transaction || await openTransaction();
+
       try {
         console.log(`    getLastSyncDate from ${config.readTable} for ${apiPath}`);
-        const transaction = await openTransaction();
 
         // TODO take the API into account (where 'path' = apiPath) !!!
         // (so we need an expression index on 'cut-path-from-href' if we don't want to have yet another column
@@ -481,38 +622,50 @@ const dbFactory = function dbFactory(config) {
         // I am not saying that this is necessarily a good idea (non-unique indexes could impact performance),
         // but it would work.
         if (mssql) {
-          const result = await doQuery(transaction, `
-            select [modified]
+          const result = await doQuery(myTransaction,
+            `select [modified]
             from [${config.schema}].[${config.readTable}]
             where 1=1
-              ${baseUrlColumnExists ? `AND baseurl = '${config.baseUrl}'` : ''}
-              ${pathColumnExists ? `AND path = '${apiPath}'` : ''}
+              ${baseUrlColumnExists ? 'AND baseurl = @baseUrl' : ''}
+              ${pathColumnExists ? 'AND path = @path' : ''}
             order by [modified] DESC
-            OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY`); // where order by d DESC limit 1
+            OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY`, // where order by d DESC limit 1
+            [
+              { name: 'baseUrl', value: config.baseUrl, type: mssql.VarChar },
+              { name: 'path', value: config.path, type: mssql.VarChar },
+            ]);
           return result.length > 0 ? result[0].modified : null;
         }
         if (pg) {
-          const result = await transaction.any(`
-            select modified
+          const result = await doQuery(myTransaction,
+            `select modified
             from ${config.schema}.${config.readTable}
             where 1=1
-              ${baseUrlColumnExists ? `AND baseurl = '${config.baseUrl}'` : ''}
-              ${pathColumnExists ? `AND path = '${apiPath}'` : ''}
+              ${baseUrlColumnExists ? 'AND baseurl = ${baseUrl}' : ''}
+              ${pathColumnExists ? 'AND path = ${path}' : ''}
             order by modified DESC
-            LIMIT 1`);
+            LIMIT 1`,
+            [
+              { name: 'baseUrl', value: config.baseUrl },
+              { name: 'path', value: config.path },
+            ]);
           return result.length > 0 ? result[0].modified : null;
         }
         return null;
       } catch (e) {
+        if (!transaction) db.rollbackTransaction(myTransaction);
         throw new Error('Something went wrong while trying to query the DB', e);
+      } finally {
+        if (!transaction) await db.commitTransaction(myTransaction);
       }
     },
     /**
+     * This creates the temp tables if they don't exist yet or empties them if they
+     * do exist already!
      *
      * @param {*} transaction
      */
     createTempTables: async function createTempTables(transaction) {
-      const columnsForDeletes = `href${baseUrlColumnExists ? ', baseurl' : ''}${pathColumnExists ? ', path' : ''}`;
       try {
         if (mssql) {
           const makeCreateTempTableString = (tblName, forDeletes) => `
@@ -520,7 +673,7 @@ const dbFactory = function dbFactory(config) {
               BEGIN
                 SELECT TOP 0 ${forDeletes ? columnsForDeletes : '*'}
                 INTO [${tblName}]
-                FROM [${config.writeTable}];
+                FROM [${config.schema}].[${config.writeTable}];
               END;
               TRUNCATE TABLE [${tblName}];`;
 
@@ -528,44 +681,75 @@ const dbFactory = function dbFactory(config) {
           // const testResults = await (await transaction.request())
           //   .query(`SELECT OBJECT_ID(N'tempdb..${tempTableNameForUpdates}') as tableId`);
           // console.log('testResults', testResults.recordset[0]);
-
           const beforeCreateUpdatesTable = new Date();
           const createRequest1 = await transaction.request();
           const createResults1 = await createRequest1.query(
             makeCreateTempTableString(tempTableNameForUpdates, false),
           );
-          console.log(`  Created temporary table for updated rows in ${elapsedTimeString(beforeCreateUpdatesTable, 'ms')}`);
+          console.log(`  Created temporary table for updated rows (${tempTableNameForUpdates}) in ${elapsedTimeString(beforeCreateUpdatesTable, 'ms')}\t${config.path}`);
 
           const beforeCreateDeletesTable = new Date();
           const createRequest2 = await transaction.request();
-          const createResults2 = await createRequest1.query(
+          const createResults2 = await createRequest2.query(
             makeCreateTempTableString(tempTableNameForDeletes, true),
           );
-          console.log(`  Created temporary table for deleted rows in ${elapsedTimeString(beforeCreateDeletesTable, 'ms')}`);
+          console.log(`  Created temporary table for deleted hrefs (${tempTableNameForDeletes}) in ${elapsedTimeString(beforeCreateDeletesTable, 'ms')}\t${config.path}`);
+
+          const beforeCreateSafeDeltaSyncTable = new Date();
+          const createRequest3 = await transaction.request();
+          const createResults3 = await createRequest3.query(
+            makeCreateTempTableString(tempTableNameForSafeDeltaSync, true),
+          );
+          console.log(`  Created temporary table for safe delta sync all hrefs (${tempTableNameForSafeDeltaSync}) in ${elapsedTimeString(beforeCreateSafeDeltaSyncTable, 'ms')}\t${config.path}`);
+
+          const beforeCreateSafeDeltaSyncInsertsTable = new Date();
+          const createRequest4 = await transaction.request();
+          const createResults4 = await createRequest4.query(
+            makeCreateTempTableString(tempTableNameForSafeDeltaSyncInserts, false),
+          );
+          console.log(`  Created temporary table for safe delta sync rows to be inserted ((${tempTableNameForSafeDeltaSyncInserts})) in ${elapsedTimeString(beforeCreateSafeDeltaSyncInsertsTable, 'ms')}\t${config.path}`);
         } else if (pg) {
-          // const sql = 'CREATE TEMPORARY TABLE $tableName:name (resourceType VarChar(100) NOT NULL, [key] VarChar(100) NOT NULL, href VarChar(1024) NOT NULL, modified DateTime NOT NULL, jsonData BSON NULL)';
           const makeCreateTempTableString = (tblName, forDeletes) => `
-            CREATE GLOBAL TEMPORARY TABLE IF NOT EXISTS ${tblName}
-            AS SELECT ${forDeletes ? columnsForDeletes : '*'} FROM ${config.schema}.${config.writeTable};
-            TRUNCATE ${tblName}`;
+              CREATE GLOBAL TEMPORARY TABLE IF NOT EXISTS ${tblName}
+              AS SELECT ${forDeletes ? columnsForDeletes : '*'} 
+                 FROM ${config.schema}.${config.writeTable}
+                 LIMIT 0;
+              TRUNCATE ${tblName};`;
 
           const beforeCreateUpdatesTable = new Date();
           await transaction.none(
             makeCreateTempTableString(tempTableNameForUpdates, false),
           );
-          console.log(`  Created temporary table for updated rows in ${elapsedTimeString(beforeCreateUpdatesTable, 'ms')}`);
+          console.log(`  Created temporary table for updated rows (${tempTableNameForUpdates}) in ${elapsedTimeString(beforeCreateUpdatesTable, 'ms')}\t${config.path}`);
 
           const beforeCreateDeletesTable = new Date();
           transaction.none(
             makeCreateTempTableString(tempTableNameForDeletes, true),
           );
-          console.log(`  Created temporary table for deleted rows in ${elapsedTimeString(beforeCreateDeletesTable, 'ms')}`);
+          console.log(`  Created temporary table for deleted rows (${tempTableNameForDeletes}) in ${elapsedTimeString(beforeCreateDeletesTable, 'ms')}\t${config.path}`);
+
+          const beforeCreateSafeDeltaSyncTable = new Date();
+          transaction.none(
+            makeCreateTempTableString(tempTableNameForSafeDeltaSync, true),
+          );
+          console.log(`  Created temporary table for safe delta sync all rows (${tempTableNameForSafeDeltaSync}) in ${elapsedTimeString(beforeCreateSafeDeltaSyncTable, 'ms')}\t${config.path}`);
+
+          const beforeCreateSafeDeltaSyncInsertsTable = new Date();
+          transaction.none(
+            makeCreateTempTableString(tempTableNameForSafeDeltaSyncInserts, false),
+          );
+          console.log(`  Created temporary table for safe delta sync rows to be inserted (${tempTableNameForSafeDeltaSyncInserts}) in ${elapsedTimeString(beforeCreateSafeDeltaSyncInsertsTable, 'ms')}\t${config.path}`);
         }
       } catch (e) {
         console.log('Creating temp tables failed', e, e.stack);
         throw new Error('Creating temp tables failed', e);
       }
     },
+    /**
+     * Copies the updates and deletes tables, safe delta sync will need some extra steps after this one...
+     * @param {*} transaction
+     * @param {boolean} fullSync
+     */
     copyTempTablesDataToWriteTable: async function copyTempTablesDataToWriteTable(transaction, fullSync = false) {
       try {
         if (mssql) {
@@ -595,7 +779,7 @@ const dbFactory = function dbFactory(config) {
           const beforeUpdate = Date.now();
           const updateRequest = await transaction.request();
           const updateResults = await updateRequest.query(`UPDATE w
-            SET w.href = t.href, w.modified = t.modified, w.jsonData = t.jsonData
+            SET w.modified = t.modified, w.jsonData = t.jsonData
             FROM [${config.schema}].[${config.writeTable}] w
             INNER JOIN [${tempTableNameForUpdates}] t
               ON t.[href] = w.[href]
@@ -637,33 +821,53 @@ const dbFactory = function dbFactory(config) {
                 )`);
           console.log(`  -> Inserted ${insertResults.rowsAffected[0]} rows into ${config.writeTable} in ${elapsedTimeString(beforeInsert, 's', insertResults.rowsAffected[0])}`);
         } else if (pg) {
-          const beforeDelete = Date.now();
-          // TODO fullSync delete will do nothing if API contains no records (because then the updatestemptable will have no records, so we can't find the resourceType)
-          // better solution would be to check for conf.api.baseUrl (cfr. getLastSyncDate)
-          const deleteQuery = fullSync
-            ? `DELETE FROM ${config.schema}.${config.writeTable} w
-              WHERE 1=1
-                ${baseUrlColumnExists ? `AND baseurl IN (SELECT DISTINCT baseurl FROM ${tempTableNameForUpdates})` : ''}
-                ${pathColumnExists ? `AND path  IN (SELECT DISTINCT path FROM ${tempTableNameForUpdates})` : ''}
-            `
-            : `DELETE FROM ${config.schema}.${config.writeTable} w
-                USING ${tempTableNameForDeletes} t
-                WHERE t.href = w.href
-                  ${baseUrlColumnExists ? 'AND t.baseurl = w.baseurl' : ''}
-                  ${pathColumnExists ? 'AND t.path = w.path' : ''}
-            `;
+          // const tableResults = await doQuery(
+          //   transaction,
+          //   `SELECT 'deletes' as table, count(*) FROM ${tempTableNameForDeletes}
+          //   UNION ALL
+          //   SELECT 'updates' as table, count(*) FROM ${tempTableNameForUpdates}
+          //   UNION ALL
+          //   SELECT 'safedelta keys' as table, count(*) FROM ${tempTableNameForSafeDeltaSync}
+          //   UNION ALL
+          //   SELECT 'safedelta inserts' as table, count(*) FROM ${tempTableNameForSafeDeltaSyncInserts}
+          //   `,
+          // );
+          // console.log(`  -> Nr of rows per temp table: ${JSON.stringify(tableResults)}`);
 
-          const deleteResults = await transaction.result(deleteQuery);
-          console.log(`  -> Deleted ${deleteResults.rowCount} rows from ${config.writeTable} in ${elapsedTimeString(beforeDelete, 's', deleteResults.rowsCount)}`);
+
+          const beforeDelete = Date.now();
+
+          const deleteResults = await doQuery(
+            transaction,
+            fullSync
+              ? `DELETE FROM ${config.schema}.${config.writeTable} w
+                WHERE 1=1
+                  ${baseUrlColumnExists ? 'AND baseurl = ${baseUrl}' : ''}
+                  ${pathColumnExists ? 'AND path = ${path}' : ''}
+              `
+              : `DELETE FROM ${config.schema}.${config.writeTable} w
+                  USING ${tempTableNameForDeletes} t
+                  WHERE w.href = t.href
+                  ${baseUrlColumnExists ? 'AND w.baseurl = t.baseurl' : ''}
+                  ${pathColumnExists ? 'AND w.path = t.path' : ''}
+            `,
+            fullSync
+              ? [
+                { name: 'baseUrl', value: config.baseUrl },
+                { name: 'path', value: config.path },
+              ]
+              : [],
+          );
+          console.log(`  -> Deleted ${deleteResults.rowCount} rows from ${config.writeTable} in ${elapsedTimeString(beforeDelete, 's', deleteResults.rowCount)}`);
 
           const beforeUpdate = Date.now();
           const w = `${config.schema}.${config.writeTable}`;
-          const updateResults = await transaction.result(`UPDATE ${w}
-            SET href = t.href, modified = t.modified, jsonData = t.jsonData
+          const updateResults = await doQuery(transaction, `UPDATE ${w}
+            SET modified = t.modified, jsonData = t.jsonData
             FROM ${tempTableNameForUpdates} t
-            WHERE t.href = ${w}.href
-              ${baseUrlColumnExists ? `AND t.baseurl = ${w}.baseurl` : ''}
-              ${pathColumnExists ? `AND t.path = ${w}.path` : ''}
+            WHERE ${w}.href = t.href
+              ${baseUrlColumnExists ? `AND ${w}.baseurl = t.baseurl` : ''}
+              ${pathColumnExists ? `AND ${w}.path = t.path` : ''}
           `);
           console.log(`  -> Updated ${updateResults.rowCount} rows from ${config.writeTable} in ${elapsedTimeString(beforeUpdate, 's', updateResults.rowCount)}`);
 
@@ -693,17 +897,173 @@ const dbFactory = function dbFactory(config) {
           console.log(`  -> Inserted ${insertResults.rowCount} rows into ${config.writeTable} in ${elapsedTimeString(beforeInsert, 's', insertResults.rowCount)}`);
         }
       } catch (e) {
-        console.log(e.stack);
+        console.log('copyTempTablesDataToWriteTable failed', e, e.stack);
         throw new Error('copyTempTablesDataToWriteTable failed', e);
       }
       return 0;
     },
     /**
-     * Update or insert the rows
+     * For safesync: REMOVE all records from the DB whose href is not in 'tempTableNameForSafeDeltaSync'
+     *  and INSERT all records in 'tempTableNameForSafeDeltaSyncInserts'
+     * @param {*} transaction
+     */
+    copySafeSyncTempTablesDataToWriteTable: async function copySafeSyncTempTablesDataToWriteTable(transaction) {
+      try {
+        if (mssql) {
+          const beforeDelete = Date.now();
+          const deleteResults = await doQuery(
+            transaction,
+            `DELETE w FROM [${config.schema}].[${config.writeTable}] w
+              WHERE NOT EXISTS (
+                SELECT 1
+                FROM [dbo].[I_API_Test_Fre] i
+                WHERE i.[href] = w.[href]
+                  ${baseUrlColumnExists ? 'AND i.baseurl = w.baseurl' : ''}
+                  ${pathColumnExists ? 'AND i.path = w.path' : ''}
+               )
+            `,
+            [
+              { name: 'baseUrl', value: config.baseUrl, type: mssql.VarChar },
+              { name: 'path', value: config.path, type: mssql.VarChar },
+            ],
+          );
+
+          console.log(`  -> Deleted ${deleteResults.rowsAffected[0]} rows from ${config.writeTable} in ${elapsedTimeString(beforeDelete, 's', deleteResults.rowsAffected[0])}`);
+
+          const beforeInsert = Date.now();
+
+          // some records can appear multiple times if the result set changes while we are fetching
+          // the pages, so try to remove doubles before inserting (take the one with most recent
+          // modified)
+          const insertQuery = `
+            INSERT INTO [${config.schema}].[${config.writeTable}](
+              href, [key], modified, jsonData
+              ${resourceTypeColumnExists ? ', resourcetype' : ''}
+              ${baseUrlColumnExists ? ', baseurl' : ''}
+              ${pathColumnExists ? ', path' : ''}
+            )
+            SELECT t.href, t.[key], t.modified, t.jsonData
+              ${resourceTypeColumnExists ? ', t.resourcetype' : ''}
+              ${baseUrlColumnExists ? ', t.baseurl' : ''}
+              ${pathColumnExists ? ', t.path' : ''}
+            FROM (select *,
+                  ROW_NUMBER() over (partition by
+                        ${baseUrlColumnExists ? 'baseurl,' : ''}
+                        ${pathColumnExists ? 'path,' : ''}
+                        href
+                      ORDER BY modified DESC) as rowNumber
+                  from [${tempTableNameForSafeDeltaSyncInserts}]) t
+            WHERE t.rowNumber = 1
+              AND NOT EXISTS (
+                select 1 from [${config.schema}].[${config.writeTable}] w
+                where t.[href] = w.[href]
+                  ${baseUrlColumnExists ? 'AND t.baseurl = w.baseurl' : ''}
+                  ${pathColumnExists ? 'AND t.path = w.path' : ''}
+                )`;
+          const insertResults = await doQuery(transaction, insertQuery);
+          console.log(`  -> Inserted ${insertResults.rowsAffected[0]} rows into ${config.writeTable} in ${elapsedTimeString(beforeInsert, 's', insertResults.rowsAffected[0])}`);
+          return insertResults.rowsAffected[0] + deleteResults.rowsAffected[0];
+        } if (pg) {
+          const beforeDelete = Date.now();
+          const deleteResults = await doQuery(
+            transaction,
+            `DELETE FROM ${config.schema}.${config.writeTable}
+              WHERE (${columnsForDeletes}) NOT IN (
+                SELECT ${columnsForDeletes} FROM ${tempTableNameForSafeDeltaSync}
+              )
+              ${baseUrlColumnExists ? 'AND baseurl = ${baseUrl}' : ''}
+              ${pathColumnExists ? 'AND path = ${path}' : ''}
+            `,
+            [
+              { name: 'baseUrl', value: config.baseUrl },
+              { name: 'path', value: config.path },
+            ],
+          );
+          console.log(`  -> Deleted ${deleteResults.rowCount} rows from ${config.writeTable} in ${elapsedTimeString(beforeDelete, 's', deleteResults.rowCount)}`);
+
+          const beforeInsert = Date.now();
+
+          // some records can appear multiple times if the result set changes while we are fetching
+          // the pages, so try to remove doubles before inserting (take the one with most recent
+          // modified)
+          const w = `${config.schema}.${config.writeTable}`;
+          const insertResults = await transaction.result(`INSERT INTO ${w}(
+              href, key, modified, jsonData
+              ${resourceTypeColumnExists ? ', resourcetype' : ''}
+              ${baseUrlColumnExists ? ', baseurl' : ''}
+              ${pathColumnExists ? ', path' : ''}
+            )
+            SELECT t.href, t.key, t.modified, t.jsonData
+              ${resourceTypeColumnExists ? ', resourcetype' : ''}
+              ${baseUrlColumnExists ? ', baseurl' : ''}
+              ${pathColumnExists ? ', path' : ''}
+            FROM ${tempTableNameForSafeDeltaSyncInserts} t
+            WHERE
+              NOT EXISTS (
+                  select 1 from ${w} w
+                  where t.href = w.href
+                    ${baseUrlColumnExists ? 'AND t.baseurl = w.baseurl' : ''}
+                    ${pathColumnExists ? 'AND t.path = w.path' : ''}
+                )`);
+          console.log(`  -> Inserted ${insertResults.rowCount} rows into ${config.writeTable} in ${elapsedTimeString(beforeInsert, 's', insertResults.rowCount)}`);
+          return insertResults.rowCount + deleteResults.rowCount;
+        }
+      } catch (e) {
+        console.log(e.stack);
+        throw new Error('copySafeSyncTempTablesDataToWriteTable failed', e);
+      }
+      return 0;
+    },
+    /**
+     * For safesync: find all hrefs that should be but aren't currently in the DB
+     * (by comparing what's in table 'tempTableNameForSafeDeltaSync' against 'writeTable')
+     * @param {*} transaction
+     */
+    findSafeSyncMissingHrefs: async function findSafeSyncMissingHrefs(transaction) {
+      try {
+        if (mssql) {
+          const beforeQuery = Date.now();
+          const request = await transaction.request();
+          const query = `SELECT [href] FROM ${tempTableNameForSafeDeltaSync} s
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM [dbo].[I_API_Test_Fre] i
+                WHERE i.[href] = s.[href]
+                  ${baseUrlColumnExists ? 'AND i.baseurl = s.baseurl' : ''}
+                  ${pathColumnExists ? 'AND i.path = s.path' : ''}
+               )
+            `;
+            // (${columnsForDeletes}) NOT IN (
+            //   SELECT ${columnsForDeletes} FROM [${config.schema}].[${config.writeTable}]
+            // )
+
+          const results = await doQuery(transaction, query);
+          console.log(`  -> Returned ${results.length} rows from ${config.writeTable} in ${elapsedTimeString(beforeQuery, 's', results.length)}`);
+          return results.map(r => r.href);
+        } if (pg) {
+          const beforeQuery = Date.now();
+          const query = `SELECT href FROM ${tempTableNameForSafeDeltaSync}
+            WHERE (${columnsForDeletes}) NOT IN (
+                SELECT ${columnsForDeletes} FROM ${config.schema}.${config.writeTable}
+              )
+            `;
+
+          const results = await doQuery(transaction, query);
+          console.log(`  -> Returned ${results.length} rows from ${config.writeTable} in ${elapsedTimeString(beforeQuery, 's', results.length)}`);
+          return results.map(r => r.href);
+        }
+      } catch (e) {
+        console.log(e.stack);
+        throw new Error('findSafeSyncMissingHrefs failed', e);
+      }
+      return 0;
+    },
+    /**
+     * Insert the rows to insert or update into a temp table
      * @param {*} apiResults array of api resources
      */
-    saveApiResultsToDb: async function saveApiResultsToDb(apiResults, transaction = null) {
-      const myTransaction = transaction || await db.openTransaction();
+    saveSafeSyncMissingApiResultsToDb: async function saveSafeSyncMissingApiResultsToDb(apiResults, transaction = null) {
+      const myTransaction = transaction || await openTransaction();
 
       try {
         // const beforeInsertForUpdate = Date.now();
@@ -711,9 +1071,10 @@ const dbFactory = function dbFactory(config) {
           myTransaction,
           apiResults, // .filter(ar => !ar.$$meta.deleted),
           false,
-          tempTableNameForUpdates,
+          tempTableNameForSafeDeltaSyncInserts,
         );
         // console.log(`  ${nrOfInsertedRowsForUpdate} rows inserted in ${elapsedTimeString(beforeInsertForUpdate, 'ms', nrOfInsertedRowsForUpdate, 's')}`);
+        return nrOfInsertedRowsForUpdate;
       } catch (err) {
         console.error('Problem updating rows', err, err.stack);
         if (!transaction) db.rollbackTransaction(myTransaction);
@@ -723,16 +1084,69 @@ const dbFactory = function dbFactory(config) {
       }
     },
     /**
-     * Update or insert the rows
+     * Insert the rows to insert or update into a temp table
+     * @param {*} apiResults array of api resources
+     */
+    saveApiResultsToDb: async function saveApiResultsToDb(apiResults, transaction = null) {
+      const myTransaction = transaction || await openTransaction();
+
+      try {
+        // const beforeInsertForUpdate = Date.now();
+        const nrOfInsertedRowsForUpdate = await doBulkInsert(
+          myTransaction,
+          apiResults,
+          false,
+          tempTableNameForUpdates,
+        );
+        // console.log(`  ${nrOfInsertedRowsForUpdate} rows inserted in ${elapsedTimeString(beforeInsertForUpdate, 'ms', nrOfInsertedRowsForUpdate, 's')}`);
+        return nrOfInsertedRowsForUpdate;
+      } catch (err) {
+        console.error('Problem updating rows', err, err.stack);
+        if (!transaction) db.rollbackTransaction(myTransaction);
+        throw new Error('Problem updating rows', err);
+      } finally {
+        if (!transaction) await db.commitTransaction(myTransaction);
+      }
+    },
+    /**
+     * Insert the hrefs of the resources that need to be deleted from the DB into a temp table
      * @param {*} hrefs array of strings (hrefs)
      */
     deleteApiResultsFromDb: async function deleteApiResultsFromDb(hrefs, transaction = null) {
-      const myTransaction = transaction || await db.openTransaction();
-
+      const myTransaction = transaction || await openTransaction();
       try {
         // const beforeInsertForDelete = Date.now();
         const nrOfInsertedRowsForDelete = await doBulkInsert(myTransaction, hrefs, true, tempTableNameForDeletes);
         // console.log(`  ${nrOfInsertedRowsForDelete} rows inserted in ${elapsedTimeString(beforeInsertForDelete, 'ms', nrOfInsertedRowsForDelete, 's')}`);
+        return nrOfInsertedRowsForDelete;
+      } catch (err) {
+        console.error('Problem updating rows', err, err.stack);
+        if (!transaction) db.rollbackTransaction(myTransaction);
+        throw new Error('Problem updating rows', err);
+      } finally {
+        if (!transaction) await db.commitTransaction(myTransaction);
+      }
+    },
+
+    /**
+     * SafeDeltaSync takes all hrefs from a filtered list resource (like /persons?gender=FEMALE)
+     * and then removes the ones not in the list from the snced DB, and fetches the newly added ones
+     * from the API to add to the DB (basically: knowing if some record has been removed will be
+     * figured out not by asking the API for deleted records, but by checking the entire list with
+     * the DB. ALSO knowing if a record HAS BECOME PART of the list not because of a recent update
+     * but because the LIST has changed due to changes in other resources).
+     *
+     * Insert the rows that the resource currently contains into a temp table
+     * @param {*} hrefs array of strings (hrefs)
+     */
+    saveSafeSyncApiResultsToDb: async function saveSafeSyncApiResultsToDb(hrefs, transaction = null) {
+      const myTransaction = transaction || await openTransaction();
+
+      try {
+        // const beforeInsertForDelete = Date.now();
+        const nrOfInsertedRowsForSafeDeltaSync = await doBulkInsert(myTransaction, hrefs, true, tempTableNameForSafeDeltaSync);
+        // console.log(`  ${nrOfInsertedRowsForDelete} rows inserted in ${elapsedTimeString(beforeInsertForDelete, 'ms', nrOfInsertedRowsForDelete, 's')}`);
+        return nrOfInsertedRowsForSafeDeltaSync;
       } catch (err) {
         console.error('Problem updating rows', err, err.stack);
         if (!transaction) db.rollbackTransaction(myTransaction);
@@ -766,8 +1180,14 @@ const dbFactory = function dbFactory(config) {
  * json.$$meta.modified DESC limit = 1"
  * (make sure that expression always has an index !!! Can we check this? If the query is
  *   slow we could at least generate a warning...)
+ *
+ * We have 2 factory functions now: one that creates a simple client, and one that creates
+ * multiple clients in order to sync many API's at once with a simplified interface.
  */
-module.exports = function Sri2DbFactory(config = {}) {
+function Sri2DbFactory(configObject = {}) {
+  // make a deep clone so the initialization object cannot be tampered with anymore afterwards
+  const config = clonedeep(configObject);
+
   if (!config.api) {
     throw new Error('[Sri2Db] invalid config object, config.api object missing');
   }
@@ -779,13 +1199,13 @@ module.exports = function Sri2DbFactory(config = {}) {
     throw new Error('api.baseUrl is not defined.');
   }
 
-  // the db module needs to know this too
-  config.db.baseUrl = config.api.baseUrl;
-  config.db.path = config.api.path;
+  const api = sriClientFactory({ ...config.api });
 
-  const api = sriClientFactory(config.api);
-
-  const db = dbFactory(config.db);
+  const db = dbFactory({
+    ...config.db,
+    baseUrl: config.api.baseUrl,
+    path: config.api.path,
+  });
 
 
   /**
@@ -849,6 +1269,56 @@ module.exports = function Sri2DbFactory(config = {}) {
     return count;
   }
 
+  async function getAllHrefs(hrefsToFetch, options = {}, batchPath = null) {
+    if (hrefsToFetch.length === 0) return [];
+
+    const keys = hrefsToFetch.map(h => h.substring(h.lastIndexOf('/') + 1));
+    const basePath = hrefsToFetch[0].substring(0, hrefsToFetch[0].lastIndexOf('/'));
+
+    /**
+     *
+     * @param {*} keys
+     * @param {*} startOffset
+     * @return { url: '<the url to fetch>', nextStartOffset: <offset to give to next call>, count: <nr of keys in url>}
+     */
+    function getNextPath(keys, startOffset) {
+      let url = `${basePath}?keyIn=`;
+      let i = startOffset;
+      let count = 0;
+      for (; url.length < 2048 && i < keys.length; i++, count++) {
+        const addComma = url.lastIndexOf('=') !== url.length - 1;
+        url = url + (addComma ? ',' : '') + keys[i];
+      }
+      if (count === 0) {
+        url = null;
+      }
+      return { nextPath: url, nextStartOffset: i, count };
+    }
+
+    let { nextPath, nextStartOffset, count } = getNextPath(keys, 0);
+    const getListOptions = { ...options, raw: true };
+    let nextJsonDataPromise = api.getList(nextPath, {}, getListOptions);
+    let pageNum = 0;
+    const retVal = [];
+    while (nextJsonDataPromise) {
+      console.log(`Trying to get ${count} hrefs starting from ${nextStartOffset}`);
+      // eslint-disable-next-line no-await-in-loop
+      const jsonData = await nextJsonDataPromise;
+      const { nextPath: np, nextStartOffset: nso, count: c } = getNextPath(keys, nextStartOffset);
+      nextPath = np;
+      nextStartOffset = nso;
+      count = c;
+
+      // already start fetching the next url
+      nextJsonDataPromise = nextPath ? api.getList(nextPath, {}, getListOptions) : null;
+
+      count += jsonData.length;
+      pageNum += 1;
+      retVal.push(...jsonData.map(r => r.$$expanded));
+    }
+    return retVal;
+  }
+
 
   // Create the necessary functions
   let lastSyncDate = null;
@@ -864,7 +1334,11 @@ module.exports = function Sri2DbFactory(config = {}) {
     // store it in memory, but if it's not initialized, you might need
     // to do a single SELECT on the database
     lastSyncDate = lastSyncDate
-      || new Date((await db.getLastSyncDate(config.api.path)).getTime() - safetyWindow);
+      || new Date(
+        ((await db.getLastSyncDate(config.api.path)) || new Date('1900-01-02')).getTime()
+          - safetyWindow
+        ,
+      );
     return rounded
       ? new Date(Math.floor((lastSyncDate.getTime() / 1000) * 1000))
       : lastSyncDate;
@@ -881,253 +1355,371 @@ module.exports = function Sri2DbFactory(config = {}) {
   }
 
 
+  let syncDonePromise = null;
+  const isSyncRunning = function isSyncRunning() {
+    return syncDonePromise && (syncDonePromise.settled === false || syncDonePromise.settled === undefined);
+  };
+
+  /**
+   * The sync method is smart enough to only restart when the previous run has finished.
+   * So they will never run in parallel. Calling sync twice, will just make the second promise
+   * return later as it awaits until the first sync finishes before it starts.
+   * Calling it three times, will return the SAME PROMISE as the second call!
+   *
+   * CRAP: I forgot to take into account that the function can be called with different parameters
+   * (like fullsync, safedeltasync, deltasync)
+   *
+   * NEW STRATEGY: the sync method will simply reject if another sync is still running
+   *
+   * @param {*} modifiedSince if UNDEFINED it will use lastSyncDate and NULL will be equivalent to a full-sync?
+   */
+  let beforePreviousSync = null;
+  // let queuedSyncPromise = null;
+  // syncPromises = object where keys = paramsAsString and values = an array of promises (currentSync and queuedSync)
+  // let syncPromises = {}
+  const sync = async function sync(modifiedSince, safeDeltaSync = false) {
+    // const paramsAsString = `${modifiedSince}|${safeDeltaSync}`
+    // inner helper function that implements the actual sync
+    async function innerSync() {
+      const beforeSync = Date.now();
+
+      try {
+        const isFullSync = modifiedSince === null;
+        const isSafeDeltaSync = !isFullSync && safeDeltaSync;
+        console.log(`${isFullSync ? 'FULL' : 'DELTA'} sync ${config.api.baseUrl}${config.api.path}`);
+
+        let modifiedSinceString = null;
+        if (modifiedSince === undefined) {
+          modifiedSinceString = moment(await getSafeLastSyncDate())/* .subtract(10, 'seconds') */
+            .toISOString();
+        } else if (modifiedSince === null) {
+          //= > full sync
+        } else {
+          modifiedSinceString = moment(modifiedSince).toISOString();
+        }
+
+        // const path = `${config.api.baseUrl}${config.api.path}${config.api.path.includes('?') ? '&' : '?'}$$meta.deleted=any&modifiedSince=${modifiedSinceString}`;
+        const limit = config.api.limit || 500;
+        // old version with &&meta.deleted=any
+        // const firstPath = `${config.api.path}${config.api.path.includes('?') ? '&' : '?'}limit=${limit}&$$meta.deleted=any${modifiedSinceString ? `&modifiedSince=${modifiedSinceString}` : ''}`;
+
+        const pathHasFilters = config.api.path.includes('?');
+        const pathWithoutFilters = config.api.path.split('?')[0];
+        const extraQueryParams = `limit=${limit}${modifiedSinceString ? `&modifiedSince=${modifiedSinceString}` : ''}`;
+        const pathHasExpandFilter = pathHasFilters && config.api.path.includes('expand=');
+
+        const updatedResourcesPath = `${config.api.path}${pathHasFilters ? '&' : '?'}${extraQueryParams}${pathHasExpandFilter ? '' : '&expand=FULL'}`;
+        // Be careful: because of modifications to a resource, it might fall out of a filtered list
+        // For example: after changing a person's gender, some person might disappear from
+        // /persons?gender=FEMALE
+        // So for deleted resources, we want to know about ALL deletions, not just the ones from
+        // the configured filtered list, which is why we remove the url part after the first '?'
+        const deletedResourcesPath = `${pathWithoutFilters}?${extraQueryParams}&$$meta.deleted=true&expand=NONE`;
+
+
+        // in case of a SAFE sync (only relevant if pathHasFilters)
+        // we also should remove 'Bo' from the table, if his/her gender was changed, and he/she now
+        // doesn't belong to /persons?gender=FEMALE anymore
+        // We will do this by getting only the keys that are part of the list, and then removing from
+        // the db any record not in that list.
+        // We should also figure out this way the ones that we didn't have in the DB yet, then fetch
+        // and insert them
+        const filteredNonExpandedPath = setExpandOnPath(`${config.api.path}${pathHasFilters ? '&' : '?'}limit=*`, 'NONE');
+
+
+        let totalCount = 0;
+        let lastModified = '';
+
+        const dbTransaction = await db.openTransaction();
+        try {
+          // only needs to be awaited when we want to actually store stuff in the DB,
+          // so we can start doing API requests before it is settled!
+          const tempTablesInitializededPromise = db.createTempTables(dbTransaction);
+
+          const beforeApiCalls = Date.now();
+
+          // first delete (real deletions)
+          if (!isFullSync && !isSafeDeltaSync) {
+            await applyFunctionToList(async (hrefs, isLastPage, pageNum, count) => {
+              console.log(`[page ${pageNum}] Trying to store ${hrefs.length} records on the DB for deletion (${count} done so far)`);
+              await tempTablesInitializededPromise; // make sure temp tables have been created by now
+              await db.deleteApiResultsFromDb(hrefs, dbTransaction);
+              // lastModified = resources.reduce(
+              //   (acc, cur) => (cur.$$meta.modified > acc ? cur.$$meta.modified : acc),
+              //   lastModified,
+              // );
+              // console.log('  Most recent lastmodified seen so far:', lastModified);
+              console.log(`Synced ${count + hrefs.length} api resources so far in ${elapsedTimeString(beforeSync, 'm', count, 's')}.`);
+
+              if (isLastPage) totalCount += count + hrefs.length;
+            },
+            deletedResourcesPath, { nextLinksBroken: config.api.nextLinksBroken });
+          }
+
+          // then insert or update
+          await applyFunctionToList(async (resources, isLastPage, pageNum, count) => {
+            console.log(`[page ${pageNum}] Trying to store ${resources.length} records on the DB for update/insert (${count} done so far)`);
+
+            // some old API's are missing $$meta.modified or even key
+            const resourcesToStore = resources.map(r => fixResourceForStoring(r));
+            await tempTablesInitializededPromise; // make sure temp tables have been created by now
+            await db.saveApiResultsToDb(resourcesToStore, dbTransaction);
+            lastModified = resourcesToStore.reduce(
+              (acc, cur) => (cur.$$meta.modified > acc ? cur.$$meta.modified : acc),
+              lastModified,
+            );
+            // console.log('  Most recent lastmodified seen so far:', lastModified);
+            console.log(`Synced ${count + resources.length} api resources so far in ${elapsedTimeString(beforeSync, 'm', count, 's')}.`);
+
+            if (isLastPage) totalCount += count + resources.length;
+          },
+          updatedResourcesPath, { nextLinksBroken: config.api.nextLinksBroken });
+
+          // UPDATE STUFF IN THE DB
+          await tempTablesInitializededPromise; // make sure temp tables have been created by now
+          await db.copyTempTablesDataToWriteTable(dbTransaction, isFullSync);
+
+          // for the SAFE delta sync, there is some extra work left
+          if (isSafeDeltaSync) {
+            // then insert or update
+            await applyFunctionToList(async (resources, isLastPage, pageNum, count) => {
+              console.log(`[page ${pageNum}] Trying to store ${resources.length} records on the DB for safe delta sync (${count} done so far)`);
+              await db.saveSafeSyncApiResultsToDb(resources, dbTransaction);
+              console.log(`Synced ${count + resources.length} api hrefs so far in ${elapsedTimeString(beforeSync, 'm', count, 's')}.`);
+            },
+            filteredNonExpandedPath, { nextLinksBroken: config.api.nextLinksBroken });
+
+            console.log('Trying to find missing hrefs in the DB that need to be fetched.');
+            // fetch all records from the API that have become a part of the list recently,
+            // but not because of a recent update of the resource itself (those would have been
+            // found already with modifiedSince)
+            const hrefsToFetch = await db.findSafeSyncMissingHrefs(dbTransaction);
+            if (hrefsToFetch.length > 0) {
+              console.log(`Trying to fetch ${hrefsToFetch.length} resources from API`);
+              const beforeFetch = Date.now();
+              const resourcesToStore = (await getAllHrefs(hrefsToFetch, {}, config.api.batchPath))
+                .map(r => fixResourceForStoring(r));
+
+              console.log(`Fetched ${resourcesToStore.length} resources from API in ${elapsedTimeString(beforeFetch, 'm', resourcesToStore.length, 's')}.`);
+              await db.saveSafeSyncMissingApiResultsToDb(
+                resourcesToStore.map(r => (r.$$expanded || r)),
+              );
+            } else {
+              console.log(`No resources to fetch from API (${hrefsToFetch.length} missing hrefs)`);
+            }
+            // after filling the DB with the necessary info also copy the stuff in the temp
+            // tables to the actual tables
+            // = delete records from DB that are NOT IN THE LIST ANYMORE & insert MISSING records
+            await db.copySafeSyncTempTablesDataToWriteTable(dbTransaction);
+          }
+
+          if (config.dryRun) {
+            console.log('Not committing transaction because dryRun');
+            db.rollbackTransaction(dbTransaction);
+          } else {
+            await db.commitTransaction(dbTransaction);
+          }
+
+          const syncDuration = Date.now() - beforeApiCalls;
+          // potentially we have seen results that were too recent (popping up while we were syncing),
+          // so subtract the duration of the sync * 1.01 (1.01 to overcompensate for any clock
+          // differences between our machine and the server) from the most recent 'modified' date
+          // ALSO look at the delta between the start of the current and the previous sync,
+          // because we can safely add this delta * 0.99 (0.99 to overcompensate for any clock
+          // differences between our machine and the server)
+          const timeBetweenThisAndPreviousSync = beforePreviousSync ? (beforeSync - beforePreviousSync) : 0;
+          if (lastModified && lastModified.length > 0) {
+            setLastSyncDate(new Date(Date.parse(lastModified)
+              - Math.round(syncDuration * 1.01)
+              + Math.round(timeBetweenThisAndPreviousSync * 0.99)));
+          } else {
+            const previousLastSyncDate = await getSafeLastSyncDate();
+            const newLastSyncDate = new Date((modifiedSince || previousLastSyncDate.getTime())
+              + Math.round(timeBetweenThisAndPreviousSync * 0.99));
+            console.log(`Updating LAST SYNC DATE from ${previousLastSyncDate.toISOString()} to ${newLastSyncDate.toISOString()}`);
+            setLastSyncDate(newLastSyncDate);
+          }
+          console.log('==== New LAST SYNC DATE =', (await getSafeLastSyncDate()).toISOString());
+
+          console.log(`Synced ${totalCount} api resources in ${elapsedTimeString(beforeSync, 'm', totalCount, 's')}.`);
+
+          // elapsedTimeCalculations(beforeSync, 'm', totalCount, 's');
+          return { ...elapsedTimeCalculations(beforeSync, 'm', totalCount, 's'), config: clonedeep(config) };
+        } catch (e) {
+          console.warn(`Problem while doing ${isFullSync ? 'FULL' : 'DELTA'} sync`, e, e.stack);
+          if (e instanceof SriClientError) {
+            console.warn(JSON.stringify(e, null, 2));
+          }
+          db.rollbackTransaction(dbTransaction);
+          throw e;
+        }
+      } finally {
+        // if (!modifiedSince)
+        beforePreviousSync = beforeSync;
+      }
+    }
+
+    // another inner helper function to handle the promises when multiple syncs are being queued
+    // if other syncs are still working return a new Promise that awaits all existing promises
+    // async function smartSync() {
+    //   // if another sync is already QUEUED, just return the same promise
+    //   if (queuedSyncPromise) {
+    //     console.log('(Previous sync still running, AND another one waiting in the queue already, returning that same Promise of the already waiting one, so I won\'t actually start yet another sync)');
+    //     return queuedSyncPromise;
+    //   }
+
+    //   queuedSyncPromise = new Promise(async (resolve, reject) => {
+    //     try {
+    //       // if another sync is already running, wait for it to end, and only then start a new one
+    //       if (syncDonePromise && !syncDonePromise.settled) {
+    //         console.log('(Previous sync still running, waiting for it to finish...)');
+    //         const beforePreviousSyncDone = Date.now();
+    //         await syncDonePromise;
+    //         console.log(`(Previous sync finished after ${elapsedTimeString(beforePreviousSyncDone, 'ms')})`);
+    //       }
+    //       const result = await innerSync();
+    //       resolve(result);
+    //     } catch (e) {
+    //       reject(e);
+    //     } finally {
+    //       queuedSyncPromise = null;
+    //     }
+    //   });
+    //   return queuedSyncPromise;
+    // }
+
+    // TODO: make sure any new call will return a Promise that awaits all other running syncs before
+    //   starting, and will return the same Promise if another one with the same params is already
+    //   scheduled in the future
+    // const syncDonePromise = syncPromises[paramsAsString] ? syncPromises[paramsAsString][0] : null;
+    // if (syncDonePromise && !syncDonePromise.settled) {
+    //   syncPromises[paramsAsString][0] = smartSync();
+    // } else {
+    //   syncPromises[paramsAsString][0] = innerSync();
+    // }
+    if (isSyncRunning()) {
+      return Promise.reject('Another sync is still running.');
+    }
+
+    syncDonePromise = innerSync(modifiedSince, safeDeltaSync).then((result) => {
+      syncDonePromise.settled = true;
+      return result;
+    }).catch((e) => {
+      syncDonePromise.settled = true;
+      throw e;
+    });
+    return syncDonePromise;
+  };
+
+
   /**
    *
    * @param {*} modifiedSince if UNDEFINED it will use lastSyncDate and NULL will be equivalent to a full-sync?
    */
-  let deltaSyncRunning = false;
-  let beforePreviousSync = null;
   const deltaSync = async function deltaSync(modifiedSince) {
-    const beforeSync = Date.now();
-
-    if (deltaSyncRunning) { return 0; }
-    deltaSyncRunning = true;
-    try {
-      const isFullSync = modifiedSince === null;
-      console.log(`${isFullSync ? 'FULL' : 'DELTA'} sync ${config.api.baseUrl}${config.api.path}`);
-
-      let modifiedSinceString = null;
-      if (modifiedSince === undefined) {
-        modifiedSinceString = moment(await getSafeLastSyncDate())/* .subtract(10, 'seconds') */
-          .toISOString();
-      } else if (modifiedSince === null) {
-        //= > full sync
-      } else {
-        modifiedSinceString = moment(modifiedSince).toISOString();
-      }
-
-      // const path = `${config.api.baseUrl}${config.api.path}${config.api.path.includes('?') ? '&' : '?'}$$meta.deleted=any&modifiedSince=${modifiedSinceString}`;
-      const limit = config.api.limit || 500;
-      // old version with &&meta.deleted=any
-      // const firstPath = `${config.api.path}${config.api.path.includes('?') ? '&' : '?'}limit=${limit}&$$meta.deleted=any${modifiedSinceString ? `&modifiedSince=${modifiedSinceString}` : ''}`;
-
-      const pathHasFilters = config.api.path.includes('?');
-      const pathWithoutFilters = config.api.path.split('?')[0];
-      const extraQueryParams = `limit=${limit}${modifiedSinceString ? `&modifiedSince=${modifiedSinceString}` : ''}`;
-
-      const updatedResourcesPath = `${config.api.path}${pathHasFilters ? '&' : '?'}${extraQueryParams}&expand=FULL`;
-      // Be careful: because of modifications to a resource, it might fall out of a filtered list
-      // For example: after changing a person's gender, some person might disappear from
-      // /persons?gender=FEMALE
-      // So for deleted resources, we want to know about ALL deletions, not just the ones from
-      // the configured filtered list, which is why we remove the url part after the first '?'
-      const deletedResourcesPath = `${pathWithoutFilters}?${extraQueryParams}&$$meta.deleted=true&expand=NONE`;
-
-
-      // in case of a SAFE sync (only relevant if pathHasFilters)
-      // we also should remove 'Bo' from the table, if his/her gender was changed, and he/she now
-      // doesn't belong to /persons?gender=FEMALE anymore
-      // We will do this by getting only the keys that are part of the list, and then removing from
-      // the db any record not in that list.
-      // We should also figure out this way the ones that we didn't have in the DB yet, then fetch
-      // and insert them
-      // const filteredNonExpandedPath = `${path}${pathHasFilters ? '&' : '?'}expand=NONE&limit=*`;
-
-
-      let totalCount = 0;
-      let lastModified = '';
-      const dbTransaction = await db.openTransaction();
-      try {
-        await db.createTempTables(dbTransaction);
-
-        const beforeApiCalls = Date.now();
-
-        // first delete (real deletions)
-        await applyFunctionToList(async (hrefs, isLastPage, pageNum, count) => {
-          console.log(`[page ${pageNum}] Trying to store ${hrefs.length} records on the DB for deletion (${count} done so far)`);
-          await db.deleteApiResultsFromDb(hrefs, dbTransaction);
-          // lastModified = resources.reduce(
-          //   (acc, cur) => (cur.$$meta.modified > acc ? cur.$$meta.modified : acc),
-          //   lastModified,
-          // );
-          // console.log('  Most recent lastmodified seen so far:', lastModified);
-          console.log(`Synced ${count + hrefs.length} api resources so far in ${elapsedTimeString(beforeSync, 'm', count, 's')}.`);
-
-          if (isLastPage) totalCount += count + hrefs.length;
-        },
-        deletedResourcesPath, { nextLinksBroken: config.api.nextLinksBroken });
-
-        // then insert or update
-        // keep a list of 'seen' urls, to use later on
-        const updatedResourcesInFilteredList = [];
-        await applyFunctionToList(async (resources, isLastPage, pageNum, count) => {
-          console.log(`[page ${pageNum}] Trying to store ${resources.length} records on the DB for update/insert (${count} done so far)`);
-          await db.saveApiResultsToDb(resources, dbTransaction);
-          lastModified = resources.reduce(
-            (acc, cur) => (cur.$$meta.modified > acc ? cur.$$meta.modified : acc),
-            lastModified,
-          );
-          // console.log('  Most recent lastmodified seen so far:', lastModified);
-          console.log(`Synced ${count + resources.length} api resources so far in ${elapsedTimeString(beforeSync, 'm', count, 's')}.`);
-
-          updatedResourcesInFilteredList.push(...resources.map(r => r.$$meta.permalink));
-
-          if (isLastPage) totalCount += count + resources.length;
-        },
-        updatedResourcesPath, { nextLinksBroken: config.api.nextLinksBroken });
-
-
-        await db.copyTempTablesDataToWriteTable(dbTransaction, isFullSync);
-        if (config.dryRun) {
-          console.log('Not committing transaction because dryRun');
-          db.rollbackTransaction(dbTransaction);
-        } else {
-          await db.commitTransaction(dbTransaction);
-        }
-
-        const syncDuration = Date.now() - beforeApiCalls;
-        // potentially we have seen results that were too recent (popping up while we were syncing),
-        // so subtract the duration of the sync * 1.01 (0.99 to overcompensate for any clock
-        // differences between our machine and the server) from the most recent 'modified' date
-        // ALSO look at the delta between the start of the current and the previous sync,
-        // because we can safely add this delta * 0.99 (0.99 to overcompensate for any clock
-        // differences between our machine and the server)
-        const timeBetweenThisAndPreviousSync = beforePreviousSync ? (beforeSync - beforePreviousSync) : 0;
-        if (lastModified && lastModified.length > 0) {
-          setLastSyncDate(new Date(Date.parse(lastModified)
-            - Math.round(syncDuration * 1.01)
-            + Math.round(timeBetweenThisAndPreviousSync * 0.99)));
-        } else {
-          const previousLastSyncDate = await getSafeLastSyncDate();
-          const newLastSyncDate = new Date((modifiedSince || previousLastSyncDate.getTime())
-            + Math.round(timeBetweenThisAndPreviousSync * 0.99));
-          console.log(`Updating LAST SYNC DATE from ${previousLastSyncDate.toISOString()} to ${newLastSyncDate.toISOString()}`);
-          setLastSyncDate(newLastSyncDate);
-        }
-        console.log('==== New LAST SYNC DATE =', (await getSafeLastSyncDate()).toISOString());
-
-        console.log(`Synced ${totalCount} api resources in ${elapsedTimeString(beforeSync, 'm', totalCount, 's')}.`);
-        return totalCount;
-      } catch (e) {
-        console.warn(`Problem while doing ${isFullSync ? 'FULL' : 'DELTA'} sync`, e, e.stack);
-        if (e instanceof SriClientError) {
-          console.warn(JSON.stringify(e.body, null, 2));
-        }
-        db.rollbackTransaction(dbTransaction);
-      }
-    } finally {
-      deltaSyncRunning = false;
-      // if (!modifiedSince)
-      beforePreviousSync = beforeSync;
-    }
-    return 0;
+    return sync(modifiedSince);
   };
 
-  const isDeltaSyncRunning = function isDeltaSyncRunning() {
-    return deltaSyncRunning;
+  /**
+   *
+   * @param {*} modifiedSince if UNDEFINED it will use lastSyncDate and NULL will be equivalent to a full-sync?
+   */
+  const safeDeltaSync = async function safeDeltaSync(modifiedSince) {
+    return sync(modifiedSince, true);
   };
 
-
-  // do a full sync getting all resources from the API and storing them
-  // this means emptying the existing DB first so we don't keep any deleted records lying around !
+  /**
+   * do a full sync getting all resources from the API and storing them
+   * this means emptying the existing DB first so we don't keep any deleted records lying around !
+   */
   const fullSync = async function fullSync() {
-    // console.log(`fullSync ${config.api.baseUrl}${config.api.path}`);
-    return deltaSync(null);
+    return sync(null);
   };
 
 
-  let socket = null;
-  let deltaSyncOnBroadcastInterval;
-  let deltaSyncRequested = false;
-  // Utility function, should/can only set up a websocket if the config tells you what the broadcastUrl is
-  const installBroadCastListeners = function installBroadCastListeners() {
-    if (!config.broadcastUrl) {
-      return null;
-    }
-
-    socket = io.connect(config.broadcastUrl);
-
-    socket.on('connect', async () => {
-      console.log('CONNECTED to audit/broadcast, listening for updates...');
-      deltaSyncOnBroadcastInterval = setInterval(() => {
-        if (deltaSyncRequested && !deltaSyncRunning) {
-          deltaSyncRequested = false;
-          deltaSync();
-        } else {
-          console.log(`No broadcast triggered delta sync needed because ${!deltaSyncRequested ? 'no delta sync requested' : ''}${deltaSyncRequested && deltaSyncRunning ? 'a delta sync is requested but another one is currently running' : ''}`);
-        }
-      }, 1000);
-      socket.emit('join', config.api.path);
-    });
-
-    socket.on('disconnect', () => {
-      console.log('DISCONNECTED from audit/broadcast, trying to reconnect');
-      uninstallBroadCastListeners();
-      installBroadCastListeners(); // no need to await
-    });
-
-    socket.on('update', async (data) => {
-      console.log(`--- Audit/broadcast sent us a new message: ${data}, requesting new delta sync.`);
-
-      deltaSyncRequested = true;
-    });
-
-    return socket;
-  };
-
-  /*
-  // Try to have a more robust connection retry strategy?
   let socket = null;
   let retryConnectInterval;
-  // Utility function, should/can only set up a websocket if the config tells you what the broadcastUrl is
-  const installBroadCastListeners = async function installBroadCastListeners() {
-    if (!config.broadcastUrl) {
-      return null;
-    }
-
-    socket = io.connect(config.broadcastUrl);
-
-    socket.on('connect', async () => {
-      console.log('CONNECTED to audit/broadcast, listening for updates...');
-
-      // stop trying to connect
-      clearInterval(retryConnectInterval);
-
-      socket.emit('join', config.api.path);
-    });
-
-    socket.on('disconnect', async () => {
-      console.log('DISCONNECTED from audit/broadcast, trying to reconnect');
-      socket = null;
-      // retry strategy to set up the connection again !
-      retryConnectInterval = setInterval(10000, installBroadCastListeners);
-    });
-
-    socket.on('update', async (data) => {
-      console.log(`--- Audit/broadcast sent us a new message: ${data}`);
-
-      const lastSync = await getSafeLastSyncDate();
-
-      if (moment(data.timestamp) > moment(lastSync)) {
-        console.log('Scheduling a new delta sync because lastSync.', data.timestamp, lastSync);
-        deltaSync();
-      } else {
-        console.log('No sync needed.', data.timestamp, lastSync);
-      }
-    });
-
-    return socket;
-  };
-  */
-
+  let retryBroadcastTriggeredSyncInterval;
 
   const uninstallBroadCastListeners = function uninstallBroadCastListeners() {
     if (socket) {
       socket.close();
       socket = null;
-      clearInterval(deltaSyncOnBroadcastInterval);
+      clearInterval(retryConnectInterval);
     }
   };
+
+  /**
+   * Utility function, should/can only set up a websocket if the config tells you
+   * what the broadcastUrl is
+   */
+  const installBroadCastListeners = function installBroadCastListeners(doSafeDeltaSync = false) {
+    if (!config.broadcastUrl) {
+      return null;
+    }
+
+    if (!socket || socket.disconnected) {
+      socket = io.connect(config.broadcastUrl);
+
+      retryConnectInterval = setInterval(() => {
+        if (!socket || socket.disconnected) {
+          console.log('Socket not connected, retry to setup the connection', config.broadcastUrl, config.api.path);
+          uninstallBroadCastListeners();
+          installBroadCastListeners();
+        }
+      }, 5000);
+
+      socket.on('connect', async () => {
+        console.log('CONNECTED to audit/broadcast, listening for updates...');
+
+        // stop trying to connect
+        clearInterval(retryConnectInterval);
+
+        socket.emit('join', config.api.path);
+      });
+
+      socket.on('disconnect', () => {
+        console.log('DISCONNECTED from audit/broadcast, trying to reconnect');
+
+        // simple version reconnects when signalled the connection isgone
+        uninstallBroadCastListeners();
+        installBroadCastListeners(safeDeltaSync);
+
+        // ALTERNATIVE: retry strategy to set up the connection again?
+        // retryConnectInterval = setInterval(10000, () => {
+        //   if (!socket.isSocketConnected()) {
+        //     installBroadCastListeners();
+        //   }
+        // });
+      });
+
+      socket.on('update', async (data) => {
+        console.log(`--- Audit/broadcast sent us a new message: ${data}, requesting new delta sync.`);
+
+        const syncMethod = doSafeDeltaSync ? safeDeltaSync : deltaSync;
+        try {
+          await syncMethod();
+        } catch (e) {
+          if (!retryBroadcastTriggeredSyncInterval) {
+            retryBroadcastTriggeredSyncInterval = setInterval(
+              async () => {
+                try {
+                  await syncMethod();
+                  clearInterval(retryBroadcastTriggeredSyncInterval);
+                } catch (e2) {
+                  console.error('Sync triggered by broadcast failed because:', e2);
+                }
+              },
+              5000,
+            );
+          }
+        }
+      });
+    }
+
+    return socket;
+  };
+
 
   const isSocketConnected = () => socket != null;
 
@@ -1137,18 +1729,110 @@ module.exports = function Sri2DbFactory(config = {}) {
   };
 
 
+  // for the configuredSync, if missing, full sync will be default
+  const methodNameToMethodMap = {
+    deltaSync,
+    safeDeltaSync,
+    fullSync,
+  };
+  const configuredSync = methodNameToMethodMap[config.syncMethod || 'fullSync'];
+  if (!configuredSync) throw `Sync type '${client.config.syncType}' doesn't map to a method`;
+
+
   // Now create and return the object containing the necessary functions for the user to use
   return {
     getSafeLastSyncDate,
     fullSync,
     deltaSync,
-    isDeltaSyncRunning,
+    safeDeltaSync,
+    configuredSync,
+    isSyncRunning,
     installBroadCastListeners,
     uninstallBroadCastListeners,
     isSocketConnected,
     close,
+    config,
   };
-};
+}
+
+/**
+ * This helps if you need to sync multiple API's, because it has a base-config object,
+ * and an array of other objects that overwrite (or fill in missing) some properties of
+ * the base config.
+ * That way you only have to provide most of the details once, and all api's will be
+ * synced as soon as you call sync.
+ * You can also control the level of concurrency between multiple syncs, allowing you
+ * to run all syncs one by one or multiple in parallel.
+ * @param {*} config STRUCTURE = {
+ *    baseConfig: {...},
+ *    concurrency: (>=1),
+ *    overwrites: [ {
+ *      (sparse sri2db config containing only the properties that differ
+ *      from the sharedConfig)
+ *    }, ... ]
+ * }
+ * @return an instance of the client that exposes the methods you can call
+ *    the most important is sync(), that returns a promise containing an array of all results
+ *    returned from the individual syncs. In case a sync fails, the result will contain the
+ *    error, the value of the resolved promise otherwise.
+ */
+function Sri2DbMultiFactory(configObject = {}) {
+  // make a deep clone so the initialization object cannot be tampered with anymore afterwards
+  const config = clonedeep(configObject);
+  if (!config.concurrency) {
+    config.concurrency = 1;
+  } else if (!Number.isInteger(config.concurrency) || config.concurrency <= 0) {
+    throw new Error('Concurrency must be a postive integer.');
+  }
+
+  const sri2dbConfigs = config.overwrites.map(ow => jsonmergepatch.apply(clonedeep(config.baseConfig), ow));
+  const sri2dbClients = sri2dbConfigs.map(c => Sri2DbFactory(c));
+
+  async function sleep(timeout) {
+    return new Promise((resolve, reject) => setTimeout(() => resolve(true), timeout));
+  }
+
+  // you'd want to hand this function's output to pAll
+  function allMethods(methodName) {
+    const tasks = sri2dbClients.map(
+      c =>
+        // console.log('Function generator for', c.config.api.path);
+        async () => {
+          console.log('[Sri2DMulti] Starting', methodName, 'for', c.config.api.path);
+          // await sleep(2000);
+          return ((await pSettle([c[methodName]()]))[0]);
+        }
+      ,
+    );
+    return tasks;
+  }
+
+  async function runAllByName(methodName) {
+    const tasks = allMethods(methodName);
+    return pAll(tasks, { concurrency: config.concurrency });
+  }
+
+  const retVal = {
+    sri2dbList: sri2dbClients,
+  };
+
+  Object.keys(sri2dbClients.length > 0 ? sri2dbClients[0] : {})
+    .filter(k => sri2dbClients[0][k] instanceof Function)
+    .forEach(k => retVal[k] = (async () => runAllByName(k)));
+
+  return retVal;
+  // {
+  //   configuredSync: (async () => syncByName('configuredSync')),
+  //   deltaSync: (async () => syncByName('deltaSync')),
+  //   safeDeltaSync: (async () => syncByName('safeDeltaSync')),
+  //   fullSync: (async () => syncByName('fullSync')),
+  //   sri2dbList: sri2dbClients,
+  // };
+}
 
 
 // export module.exports;
+module.exports = {
+  Sri2Db: Sri2DbFactory,
+  Sri2DbMulti: Sri2DbMultiFactory,
+};

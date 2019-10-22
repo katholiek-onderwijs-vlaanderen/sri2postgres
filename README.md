@@ -22,21 +22,26 @@ A resource is basically a json object with attributes, like a school or a file o
 Start by requiring the module in your code. 
     
 <code>
-const Sri2Db = require('sri2postgres');
+const { Sri2Db, Sri2DbMulti } = require('sri2postgres');
 </code>
 
-Then you will need to tell which api and which database through a config file:
+## Sri2Db
+
+Sri2Db is the base, that allows you to sync a single API endpoint to a database table.
+
+You will need to configure which api and which database through a config file:
 
 <code>
-const config = {
+const sri2dbConfig = {
+    syncMethod: 'fullSync' | 'deltaSync' | 'safeDeltaSync', // to define the sync that will be executed when calling client.configuredSync()
     dryRun: false, // true would rollback transactions to simply check if it all works
-    broadcastUrl: "https://some-broadcast-api.herokuapp.com/", // if you want to trigger delta sycs based on live updates via socket.io
+    broadcastUrl: "https://some-broadcast-api.herokuapp.com/", // if you want to trigger delta syncs based on live updates via socket.io
     api: {
         baseUrl: 'https://api.my.org',
         path: '/persons', //could also be /persons?gender=FEMALE if you only want to sync part of a list
-        username: 'userthatcanreadallresources', // can be omitted if APi is public
-        password: 'secret',                      // can be omitted if APi is public
-        //headers: {}, //extra headers like tokens etc.
+        username: 'userthatcanreadallresources', // can be omitted if API is public
+        password: 'secret',                      // can be omitted if API is public
+        //headers: {}, //configure extra http headers if necessary
         timeout: 30000,
         nrOfRetries: 2,
         limit: 2500,
@@ -55,13 +60,13 @@ const config = {
     },
 }
 
-const client = Sri2Db(config);
+const client = Sri2Db(sri2dbConfig);
 </code>
 
 Now we are ready to start syncing resources.
 
 
-## Function Definitions
+### Function Definitions
 
 Below is a description of the different types of functions that you can use.
 It describes the inputs and outputs of the different functions.
@@ -138,6 +143,61 @@ If you've configured the broadcast url, you can also start the listener, which w
 client.installBroadCastListeners();
 </code>
 
+
+
+
+## Sri2DbMulti
+
+Sri2DbMulti is building on top of Sri2Db to provide an easier way to sync multiple API endpoints into a database table.
+In the background it instantiates multiple Sri2Db clients each with their own configuration.
+
+You will need to configure which api and which database through a config file:
+
+<code>
+const sri2dbMultiConfig = {
+    baseConfig: {
+        ... //same as Sri2DConfig
+    },
+    overwrites: [
+        // a list of partial objects that only specify the properties that need to be overridden for that client
+        {
+            syncMethod: "fullSync", //even if the baseConfig says do a deltaSync, specificy that this API has to do a fullSync (when calling configuredSync)
+            api: {
+                path: '/organisations', //this instance will sync the organisations API
+            }
+        },
+        {
+            syncMethod: "fullSync", //even if the baseConfig says do a deltaSync, specificy that this API has to do a fullSync (when calling configuredSync)
+            api: {
+                path: '/subjects', //this instance will sync the subjects API
+            },
+            db: {
+                table: 'subjects_apisync_table' // we'll sync this api to a different database table
+            }
+        },
+    },
+    concurrency: 1 // if you want, you can allow multiple syncs to run in parallel
+}
+
+const multiClient = Sri2DbMulti(sri2dbMultiConfig);
+</code>
+
+### Function Definitions
+
+You can call all the same functions as on a simple client: configuredSync (will run the configured syncMethod for each instance), but also fullSync, deltaSync and safeDeltaSync.
+<code>
+const results = await multiClient.configuredSync();
+</code>
+
+and the resutls will have the following structure:
+<code>
+[
+    { isFulfilled: true, isRejected: false, value: 4 }, // if the promise resolved
+    { isFulfilled: false, isRejected: true, reason: <Error object> }, // if the promise got rejected
+]
+</code>
+so you'll always know exactly which syncs have run correctly and which syncs haven't.
+
 ## Database table layout
 
 sri2db assumes that the schema.table you set in config has a specific set of columns (and column names):
@@ -146,11 +206,18 @@ sri2db assumes that the schema.table you set in config has a specific set of col
 
     CREATE TABLE sri2db_table (href varchar, jsondata jsonb, modified timestamptz, key varchar, resourcetype varchar, path varchar, baseurl varchar);
 
-    /* at the very least, create an index on href, make it UNIQUE if you'll only store one path in
-    this table or if you know for certain that the paths you store will never contain the same
-    hrefs */
-    CREATE INDEX sri2db_table_href_idx ON sri2db_table (href);
-    /* and to get the last sycn date, an index on modified would also make a lot of sense */
+    /* at the very least, create an unique index on href, but if you have path and baseurl in the table the index should contain these fields too */
+    CREATE UNIQUE INDEX sri2db_table_baseurl_path_href_idx ON table (baseurl, path, href);
+    -- or if no baseurl colomn
+    CREATE UNIQUE INDEX sri2db_table_path_href_idx ON sri2db_table (path, href);
+    -- or if no baseurl and no path column
+    CREATE UNIQUE INDEX sri2db_table_href_idx ON sri2db_table (href);
+
+    /* and to quickly get the last sync date, a similar index on modified would also make sense */
+    CREATE INDEX sri2db_table_baseurl_path_modified_idx ON sri2db_table (baseurl, path, modified);
+    -- or if no baseurl colomn
+    CREATE INDEX sri2db_table_path_modified_idx ON sri2db_table (path, modified);
+    -- or if no baseurl and no path column
     CREATE INDEX sri2db_table_modified_idx ON sri2db_table (modified);
 
  * the 'key' column can also be of type uuid, but in case the key is not a uuid varchar would be a safer bet.
@@ -162,13 +229,20 @@ sri2db assumes that the schema.table you set in config has a specific set of col
 
 ### MSSQL
 
-    CREATE TABLE sri2db_table (href varchar, jsondata nvarchar(MAX), modified datetime, key varchar, resourcetype varchar, path varchar, baseurl varchar);
+	CREATE TABLE sri2db_table (href varchar(1024) NOT NULL, jsondata nvarchar(MAX), modified datetime NOT NULL, [key] varchar(100) NOT NULL, /*resourcetype varchar(100) NOT NULL,*/ path varchar(1024) NOT NULL, baseurl varchar(1024) NOT NULL);
 
-    /* at the very least, create an index on href, make it UNIQUE if you'll only store one path in
-    this table or if you know for certain that the paths you store will never contain the same
-    hrefs */
-    CREATE INDEX sri2db_table_href_idx ON table (href);
-    /* and to get the last sycn date, an index on modified would also make a lot of sense */
+    /* at the very least, create an unique index on href, but if you have path and baseurl in the table the index should contain these fields too */
+    CREATE UNIQUE INDEX sri2db_table_baseurl_path_href_idx ON table (baseurl, path, href);
+    -- or if no baseurl colomn
+    CREATE UNIQUE INDEX sri2db_table_path_href_idx ON sri2db_table (path, href);
+    -- or if no baseurl and no path column
+    CREATE UNIQUE INDEX sri2db_table_href_idx ON sri2db_table (href);
+    
+    /* and to quickly get the last sync date, a similar index on modified would also make sense */
+    CREATE INDEX sri2db_table_baseurl_path_modified_idx ON sri2db_table (baseurl, path, modified);
+    -- or if no baseurl colomn
+    CREATE INDEX sri2db_table_path_modified_idx ON sri2db_table (path, modified);
+    -- or if no baseurl and no path column
     CREATE INDEX sri2db_table_modified_idx ON sri2db_table (modified);
 
 
