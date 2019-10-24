@@ -489,7 +489,7 @@ const dbFactory = function dbFactory(configObject = {}) {
           pool: {
             max: 10,
             min: 0,
-            idleTimeoutMillis: 30000,
+            idleTimeoutMillis: 10 * 60 * 1000,
             connectionTimeout: 60 * 60 * 1000, // 1 hour
           },
           requestTimeout: 5 * 60 * 1000, // 5 minutes
@@ -513,7 +513,7 @@ const dbFactory = function dbFactory(configObject = {}) {
           // pool: {
           max: 10,
           min: 0,
-          idleTimeoutMillis: 30000,
+          idleTimeoutMillis: 10 * 60 * 1000,
           connectionTimeout: 60 * 60 * 1000, // 1 hour
           // },
           capSQL: true, // capitalize all generated SQL
