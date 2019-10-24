@@ -489,10 +489,10 @@ const dbFactory = function dbFactory(configObject = {}) {
           pool: {
             max: 10,
             min: 0,
-            idleTimeoutMillis: 10 * 60 * 1000,
+            idleTimeoutMillis: 60 * 60 * 1000, // 1 hour
             connectionTimeout: 60 * 60 * 1000, // 1 hour
           },
-          requestTimeout: 5 * 60 * 1000, // 5 minutes
+          requestTimeout: 60 * 60 * 1000, // 1 hour
         };
 
         poolOrConnection = new mssql.ConnectionPool(mssqlconfig);
