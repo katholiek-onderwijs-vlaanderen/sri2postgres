@@ -890,7 +890,7 @@ const dbFactory = function dbFactory(configObject = {}) {
           // const deleteResults = await deleteRequest.query(`DELETE FROM [${config.schema}].[${config.writeTable}]
           //   WHERE EXISTS (select 1 from [${tempTableNameForDeletes}] AS t where t.[key] = [${config.schema}].[${config.writeTable}].[key] AND t.resourceType = [${config.schema}].[${config.writeTable}].resourceType)`);
 
-          const fullSyncDeletesAll = true;
+          const fullSyncDeletesAll = false;
           const fullSyncDeleteQuery = fullSyncDeletesAll
             ? `DELETE w
               FROM [${config.schema}].[${config.writeTable}] w
@@ -936,8 +936,8 @@ const dbFactory = function dbFactory(configObject = {}) {
           const beforeUpdate = Date.now();
           const updateResults = await doQuery(transaction, `UPDATE w
             SET w.modified = t.modified, w.jsonData = t.jsonData
-            FROM [${config.schema}].[${config.writeTable}] w
-            INNER JOIN [${tempTableNameForUpdates}] t
+            FROM [${tempTableNameForUpdates}] t
+            INNER JOIN [${config.schema}].[${config.writeTable}] w
               ON t.[href] = w.[href]
                 ${baseUrlColumnExists ? 'AND t.baseurl = w.baseurl' : ''}
                 ${pathColumnExists ? 'AND t.path = w.path' : ''}
