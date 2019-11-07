@@ -106,20 +106,16 @@ nrOfSyncedRecords = await client.safeDeltaSync();
 </code>
 
 
-**When you start a new client** *getSafeLastSyncDate()* will subtract a fair amount (24h) of the last
-known modified date in the DB (that's why we called it 'safe').
-As soon as the client is running, the 'internal' lastModified date will be updated in a very conservative way to make sure you won't miss a single update (on subsequent calls, it will take the
-last known modified date into account while subtracting the time it took for the deltaSync to run with a correction factor to avoid any clock speed differences between the 2 systems). As you can see we always use dates we get from the server as a reference, and don't use our own clock if possible because it can be off.
-In a naive implementation, simply getting the last
-known modified date from the DB would be a bit unreliable, because if things changed *while* you were
-doing multiple gets (following next links) there is a tiny chance you would miss an updated record.
+*getLastSyncDates(syncType)* will return an object with 2 properties for the given syncType (DELTA, SAFEDELTA, FULL):
+ * syncStart: the point in time the last known succesful sync started measured by the client machine that was running Sri2DB (expressed as the number of milliseconds since 1970-01-01 00:00:00 UTC (Unix Epoch))
+ * lastModified: the next point in time that should be used (calculated conservatively) as a safe value for modifiedSince (expressed as the number of milliseconds since 1970-01-01 00:00:00 UTC (Unix Epoch)) 
 
 Nevertheless: doing full syncs from time to time, or nightly syncs that sync everything from the last week or even the last month are always a good strategy.
 
 If you want to know the date that will be used to send to the API (?modifiedSince=...) on the next run, you can call:
 <code>
 // first call will take it from the DB, after that it will be the internally calculated date
-let lastSyncDate = client.getSafeLastSyncDate();
+const { syncStart, lastModified } = client.getLastSyncDates();
 </code>
 
 You can also do a delta sync taking all modifications starting from a given point in time:
@@ -127,12 +123,8 @@ You can also do a delta sync taking all modifications starting from a given poin
 <code>
 nrOfSyncedRecords = await client.deltaSync('2019-07-16T07:44:00Z');
 </code>
-which is equivalent to:
-<code>
-client.setLastSyncDate( new Date('2019-07-16T07:44:00Z') );
-nrOfSyncedRecords = await client.deltaSync();
-</code>
 
+But be aware that in this case the syncStart and lastModified will not be updated.
 
 A delta sync will return immediately with a return value of 0 if another one is still running!
 
@@ -200,7 +192,13 @@ so you'll always know exactly which syncs have run correctly and which syncs hav
 
 ## Database table layout
 
-sri2db assumes that the schema.table you set in config has a specific set of columns (and column names):
+Sri2db assumes that the schema.table you set in config has a specific set of columns (and column names)
+
+Next to that, a table named sri2db_synctimes will be created to keep track of the last sync times,
+in order to make sure that calling deltaSync and safeDeltaSync will automatically use a &modifiedSince=...
+parameter that makes sense. These values are updated in a very conservative way whithout making
+assumptions about the clocks of the client and database and the API being in sync. The only assumption
+being made is that the clock speed of the client machine and the API will not be off by more than 1%.
 
 ### Postgres
 
@@ -213,7 +211,7 @@ sri2db assumes that the schema.table you set in config has a specific set of col
     -- or if no baseurl and no path column
     CREATE UNIQUE INDEX sri2db_table_href_idx ON sri2db_table (href);
 
-    /* and to quickly get the last sync date, a similar index on modified would also make sense */
+    /* [DEPRECATED] and to quickly get the last sync date, a similar index on modified would also make sense */
     CREATE INDEX sri2db_table_baseurl_path_modified_idx ON sri2db_table (baseurl, path, modified);
     -- or if no baseurl colomn
     CREATE INDEX sri2db_table_path_modified_idx ON sri2db_table (path, modified);
@@ -238,7 +236,7 @@ sri2db assumes that the schema.table you set in config has a specific set of col
     -- or if no baseurl and no path column
     CREATE UNIQUE INDEX sri2db_table_href_idx ON sri2db_table (href);
     
-    /* and to quickly get the last sync date, a similar index on modified would also make sense */
+    /* [DEPRECATED] and to quickly get the last sync date, a similar index on modified would also make sense */
     CREATE INDEX sri2db_table_baseurl_path_modified_idx ON sri2db_table (baseurl, path, modified);
     -- or if no baseurl colomn
     CREATE INDEX sri2db_table_path_modified_idx ON sri2db_table (path, modified);

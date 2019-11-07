@@ -214,6 +214,7 @@ const dbFactory = function dbFactory(configObject = {}) {
     config.readTable = config.table;
   }
 
+  const lastSyncTimesTableName = 'sri2db_synctimes';
   const tempTablePrefix = Math.random().toString(26).substring(5);
   const tempTableNameForUpdates = `${mssql ? '##' : ''}sri2db_${tempTablePrefix}_updates`;
   const tempTableNameForDeletes = `${mssql ? '##' : ''}sri2db_${tempTablePrefix}_deletes`;
@@ -243,8 +244,9 @@ const dbFactory = function dbFactory(configObject = {}) {
   /**
    *
    * @param {*} transaction
-   * @param {*} query the query string containing '@paramName' parts for the named params
-   *  and in the case of postgres \${paramName}
+   * @param {*} query the query string containing '<at-symbol>paramName' parts for the named params
+   *  and in the case of postgres \${paramName} (prefixed with a backslash when used inside a
+   *  JS template string)
    * @param {*} params if mssql: an array of { name: '', type: mssql.VarChar, value: ... }
    *   for postgres the type is not needed
    * @param {bool} explain if true will run the query prependen with 'explain analyze' first,
@@ -471,6 +473,58 @@ const dbFactory = function dbFactory(configObject = {}) {
     }
   }
 
+  /**
+   * Will create a table to store the last sync times, that will be used to retrieve
+   * the last sync date depending on the sync type (FULL, DELTA, SAFEDELTA, ...):
+   *
+   * | tablename | baseurl | path | synctype | timestamp |
+   *
+   * @param {*} dbTransaction
+   */
+  async function createLastSyncTimesTableIfNecessary(dbTransaction) {
+    return doQuery(
+      dbTransaction,
+      (
+        mssql
+          ? `IF OBJECT_ID(N'[${config.schema}].[${lastSyncTimesTableName}]') IS NULL
+            BEGIN
+              CREATE TABLE [${config.schema}].[${lastSyncTimesTableName}] (
+                tablename varchar(1024) NOT NULL,
+                baseurl varchar(1024) NOT NULL,
+                path varchar(1024) NOT NULL,
+                synctype varchar(64) NOT NULL,
+                lastmodified bigint NOT NULL,
+                syncstart bigint
+              );
+            END;
+            -- And add the necessary indexes for fast retrieval
+            `
+          : `CREATE TABLE IF NOT EXISTS ${config.schema}.${lastSyncTimesTableName} (
+              tablename varchar(1024) NOT NULL,
+              baseurl varchar(1024) NOT NULL,
+              path varchar(1024) NOT NULL,
+              synctype varchar(64) NOT NULL,
+              lastmodified bigint NOT NULL,
+              syncstart bigint
+          );
+            -- And add the necessary indexes for fast retrieval
+            DO $$
+              BEGIN
+                IF NOT EXISTS (
+                  SELECT conrelid
+                  FROM pg_constraint
+                  WHERE  conname = '${lastSyncTimesTableName}_unique_tablename_baseurl_path_synctype'
+                )
+                THEN
+                  ALTER TABLE ${config.schema}.${lastSyncTimesTableName} ADD CONSTRAINT ${lastSyncTimesTableName}_unique_tablename_baseurl_path_synctype
+                  UNIQUE (tablename, baseurl, path, synctype);
+                END IF;
+              END;
+            $$
+            `
+      ),
+    );
+  }
 
   /**
    * Get connection from pool and open a transaction on it
@@ -550,6 +604,9 @@ const dbFactory = function dbFactory(configObject = {}) {
       if (pathColumnExists) tableColumnNamesForDeletes.push('path');
       columnsForDeletes = mssql ? `[${tableColumnNamesForDeletes.join('],[')}]` : tableColumnNamesForDeletes.join();
 
+
+      const createLastSyncTimesTableResults = await createLastSyncTimesTableIfNecessary(transaction);
+
       initialized = true;
     }
 
@@ -601,55 +658,73 @@ const dbFactory = function dbFactory(configObject = {}) {
      * @returns the last sync date from the most recent sync this process has run,
      *   or (on a cold start) null if DB is empty and the most recent 'modified' otherwise
      */
-    getLastSyncDate: async function getLastSyncDate(apiPath, transaction = null) {
+    getLastSyncDates: async function getLastSyncDates(syncType, transaction = null) {
       const myTransaction = transaction || await openTransaction();
 
       try {
-        console.log(`    getLastSyncDate from ${config.readTable} for ${apiPath}`);
+        console.log(`    getLastSyncDate ${syncType} sync on ${config.readTable} for ${config.path}`);
 
-        // TODO take the API into account (where 'path' = apiPath) !!!
-        // (so we need an expression index on 'cut-path-from-href' if we don't want to have yet another column
-        // + this is safer than using resourceType and also allows us not to have to configure the resourceType (the API will tell us in $$meta)
-        // Thinking about it: this should store the resourceListPath, because that is the one returning
-        // the results and that is the one the modifiedSince applies to.
-        // For example if we request /organisationalunits to the old VOS api we'll get a list returning
-        // /schools/<guid>, /clbs/<guid>, but not a single /organisationalunits/<guid>, so it
-        // would only work properly if we store which LIST returned this result (and multiple lists could
-        // potentially return the same result)
-        // this way, we could be syncing multiple list urls (incl. query params) into the same table
-        // (and in some cases store multiple copies of the same resource). For example: /persons?gender=F
-        // and /persons?birthDateBefore=2001-09-01
-        // I am not saying that this is necessarily a good idea (non-unique indexes could impact performance),
-        // but it would work.
         if (mssql) {
           const result = await doQuery(myTransaction,
-            `select [modified]
-            from [${config.schema}].[${config.readTable}]
-            where 1=1
-              ${baseUrlColumnExists ? 'AND baseurl = @baseUrl' : ''}
-              ${pathColumnExists ? 'AND path = @path' : ''}
-            order by [modified] DESC
-            OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY`, // where order by d DESC limit 1
+            `select lastmodified, syncstart
+            from [${config.schema}].[${lastSyncTimesTableName}]
+            where tablename = @tableName
+              AND baseurl = @baseUrl
+              AND path = @path
+              AND synctype = @syncType
+            `,
             [
-              { name: 'baseUrl', value: config.baseUrl, type: mssql.VarChar },
-              { name: 'path', value: config.path, type: mssql.VarChar },
+              { name: 'tableName', type: mssql.VarChar, value: config.table },
+              { name: 'baseUrl', type: mssql.VarChar, value: config.baseUrl },
+              { name: 'path', type: mssql.VarChar, value: config.path },
+              { name: 'syncType', type: mssql.VarChar, value: syncType },
             ]);
-          return result.length > 0 ? result[0].modified : null;
+          return result.length > 0 ? { lastModified: Number.parseInt(result[0].lastmodified), syncStart: Number.parseInt(result[0].syncstart) } : null;
+
+          // const result = await doQuery(myTransaction,
+          //   `select [modified]
+          //   from [${config.schema}].[${config.readTable}]
+          //   where 1=1
+          //     ${baseUrlColumnExists ? 'AND baseurl = @baseUrl' : ''}
+          //     ${pathColumnExists ? 'AND path = @path' : ''}
+          //   order by [modified] DESC
+          //   OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY`, // where order by d DESC limit 1
+          //   [
+          //     { name: 'baseUrl', value: config.baseUrl, type: mssql.VarChar },
+          //     { name: 'path', value: config.path, type: mssql.VarChar },
+          //   ]);
+          // return result.length > 0 ? result[0].modified : null;
         }
         if (pg) {
           const result = await doQuery(myTransaction,
-            `select modified
-            from ${config.schema}.${config.readTable}
-            where 1=1
-              ${baseUrlColumnExists ? 'AND baseurl = ${baseUrl}' : ''}
-              ${pathColumnExists ? 'AND path = ${path}' : ''}
-            order by modified DESC
-            LIMIT 1`,
+            `select lastmodified, syncstart
+            from ${config.schema}.${lastSyncTimesTableName}
+            where tablename = \${tableName}
+              AND baseurl = \${baseUrl}
+              AND path = \${path}
+              AND synctype = \${syncType}
+            `,
             [
+              { name: 'tableName', value: config.table },
               { name: 'baseUrl', value: config.baseUrl },
               { name: 'path', value: config.path },
+              { name: 'syncType', value: syncType },
             ]);
-          return result.length > 0 ? result[0].modified : null;
+          return result.length > 0 ? { lastModified: result[0].lastmodified, syncStart: result[0].syncstart } : null;
+
+          // const result = await doQuery(myTransaction,
+          //   `select modified
+          //   from ${config.schema}.${config.readTable}
+          //   where 1=1
+          //     ${baseUrlColumnExists ? 'AND baseurl = ${baseUrl}' : ''}
+          //     ${pathColumnExists ? 'AND path = ${path}' : ''}
+          //   order by modified DESC
+          //   LIMIT 1`,
+          //   [
+          //     { name: 'baseUrl', value: config.baseUrl },
+          //     { name: 'path', value: config.path },
+          //   ]);
+          // return result.length > 0 ? result[0].modified : null;
         }
         return null;
       } catch (e) {
@@ -659,6 +734,64 @@ const dbFactory = function dbFactory(configObject = {}) {
         if (!transaction) await db.commitTransaction(myTransaction);
       }
     },
+    /**
+     * Store the last sync date for the given syncType (like DELTA, FULL, SAFEDELTA) on the DB
+     * so it can be retrieved later with getLastSyncDate
+     *
+     * @param {String} syncType for example DELTA, FULL, SAFEDELTA
+     * @param {Date} lastSyncDate
+     * @param {*} transaction (OPTIONAL)
+     */
+    setLastSyncTimestamps: async function setLastSyncTimestamps(syncType, lastModified, syncStart, transaction = null) {
+      const myTransaction = transaction || await openTransaction();
+      try {
+        console.log(`    setLastSyncDate ${syncType} sync on ${config.readTable} for ${config.path}`);
+
+        if (mssql) {
+          const result = await doQuery(myTransaction,
+            `DELETE FROM [${config.schema}].[${lastSyncTimesTableName}] WHERE tablename = @tableName AND baseurl = @baseUrl AND path = @path AND synctype = @syncType;
+            INSERT INTO [${config.schema}].[${lastSyncTimesTableName}] (tablename, baseurl, path, synctype, lastmodified, syncstart)
+            VALUES (@tableName, @baseUrl, @path, @syncType, @lastModified, @syncStart);
+            `,
+            [
+              { name: 'tableName', type: mssql.VarChar, value: config.table },
+              { name: 'baseUrl', type: mssql.VarChar, value: config.baseUrl },
+              { name: 'path', type: mssql.VarChar, value: config.path },
+              { name: 'syncType', type: mssql.VarChar, value: syncType },
+              { name: 'lastModified', type: mssql.BigInt, value: lastModified },
+              { name: 'syncStart', type: mssql.BigInt, value: syncStart },
+            ]);
+          return true; // result.length > 0 ? result[0].modified : null;
+        }
+        if (pg) {
+          const result = await doQuery(myTransaction,
+            `INSERT INTO ${config.schema}.${lastSyncTimesTableName} as t (tablename, baseurl, path, synctype, lastmodified, syncstart)
+            VALUES (\${tableName}, \${baseUrl}, \${path}, \${syncType}, \${lastModified}, \${syncStart})
+            ON CONFLICT (tablename, baseurl, path, synctype)
+              DO UPDATE
+              SET lastmodified = \${lastModified}, syncstart = \${syncStart}
+              WHERE t.tablename = \${tableName} AND t.baseurl = \${baseUrl} AND t.path = \${path} AND t.synctype = \${syncType}
+            `,
+            [
+              { name: 'tableName', value: config.table },
+              { name: 'baseUrl', value: config.baseUrl },
+              { name: 'path', value: config.path },
+              { name: 'syncType', value: syncType },
+              { name: 'lastModified', value: lastModified },
+              { name: 'syncStart', value: syncStart },
+            ]);
+          return result.rowCount;
+        }
+        return null;
+      } catch (e) {
+        if (!transaction) db.rollbackTransaction(myTransaction);
+        throw new Error('Something went wrong while trying to set last sync date on the DB', e);
+      } finally {
+        if (!transaction) await db.commitTransaction(myTransaction);
+      }
+    },
+
+
     /**
      * This creates the temp tables if they don't exist yet or empties them if they
      * do exist already!
@@ -754,31 +887,54 @@ const dbFactory = function dbFactory(configObject = {}) {
       try {
         if (mssql) {
           const beforeDelete = Date.now();
-          const deleteRequest = await transaction.request();
           // const deleteResults = await deleteRequest.query(`DELETE FROM [${config.schema}].[${config.writeTable}]
           //   WHERE EXISTS (select 1 from [${tempTableNameForDeletes}] AS t where t.[key] = [${config.schema}].[${config.writeTable}].[key] AND t.resourceType = [${config.schema}].[${config.writeTable}].resourceType)`);
 
-          // TODO fullSync delete will do nothing if API contains no records (because then the updatestemptable will have no records, so we can't find the resourceType)
-          const deleteQuery = fullSync
+          const fullSyncDeletesAll = true;
+          const fullSyncDeleteQuery = fullSyncDeletesAll
             ? `DELETE w
               FROM [${config.schema}].[${config.writeTable}] w
               WHERE 1=1
-                ${baseUrlColumnExists ? `AND baseurl IN (SELECT DISTINCT baseurl FROM [${tempTableNameForUpdates}])` : ''}
-                ${pathColumnExists ? `AND path  IN (SELECT DISTINCT path FROM [${tempTableNameForUpdates}])` : ''}
-              `
+                ${baseUrlColumnExists ? 'AND w.baseurl = @baseurl' : ''}
+                ${pathColumnExists ? 'AND w.path = @path' : ''}
+            `
             : `DELETE w FROM [${config.schema}].[${config.writeTable}] w
-              INNER JOIN [${tempTableNameForDeletes}] t
-                ON t.[href] = w.[href]
-                  ${baseUrlColumnExists ? 'AND t.baseurl = w.baseurl' : ''}
-                  ${pathColumnExists ? 'AND t.[path] = w.[path]' : ''}
+              WHERE NOT EXISTS (
+                SELECT 1
+                FROM [${tempTableNameForUpdates}] i
+                WHERE i.[href] = w.[href]
+                  ${baseUrlColumnExists ? 'AND i.baseurl = w.baseurl' : ''}
+                  ${pathColumnExists ? 'AND i.path = w.path' : ''}
+              )
+              ${baseUrlColumnExists ? 'AND w.baseurl = @baseurl' : ''}
+              ${pathColumnExists ? 'AND w.path = @path' : ''}
             `;
 
-          const deleteResults = await deleteRequest.query(deleteQuery);
+
+          const deltaSyncDeleteQuery = `
+            DELETE w FROM [${config.schema}].[${config.writeTable}] w
+            INNER JOIN [${tempTableNameForDeletes}] t
+              ON t.[href] = w.[href]
+                ${baseUrlColumnExists ? 'AND t.baseurl = w.baseurl' : ''}
+                ${pathColumnExists ? 'AND t.[path] = w.[path]' : ''}
+          `;
+
+          const deleteQuery = fullSync ? fullSyncDeleteQuery : deltaSyncDeleteQuery;
+
+          const deleteResults = await doQuery(
+            transaction,
+            deleteQuery,
+            fullSync
+              ? [
+                { name: 'baseurl', type: mssql.VarChar, value: config.baseUrl },
+                { name: 'path', type: mssql.VarChar, value: config.path },
+              ]
+              : [],
+          );
           console.log(`  -> Deleted ${deleteResults.rowsAffected[0]} rows from ${config.writeTable} in ${elapsedTimeString(beforeDelete, 's', deleteResults.rowsAffected[0])}`);
 
           const beforeUpdate = Date.now();
-          const updateRequest = await transaction.request();
-          const updateResults = await updateRequest.query(`UPDATE w
+          const updateResults = await doQuery(transaction, `UPDATE w
             SET w.modified = t.modified, w.jsonData = t.jsonData
             FROM [${config.schema}].[${config.writeTable}] w
             INNER JOIN [${tempTableNameForUpdates}] t
@@ -789,12 +945,10 @@ const dbFactory = function dbFactory(configObject = {}) {
           console.log(`  -> Updated ${updateResults.rowsAffected[0]} rows from ${config.writeTable} in ${elapsedTimeString(beforeUpdate, 's', updateResults.rowsAffected[0])}`);
 
           const beforeInsert = Date.now();
-          const insertRequest = await transaction.request();
-
           // some records can appear multiple times if the result set changes while we are fetching
           // the pages, so try to remove doubles before inserting (take the one with most recent
           // modified)
-          const insertResults = await insertRequest.query(`
+          const insertResults = await doQuery(transaction, `
             INSERT INTO [${config.schema}].[${config.writeTable}](
               href, [key], modified, jsonData
               ${resourceTypeColumnExists ? ', resourcetype' : ''}
@@ -840,11 +994,19 @@ const dbFactory = function dbFactory(configObject = {}) {
           const deleteResults = await doQuery(
             transaction,
             fullSync
-              ? `DELETE FROM ${config.schema}.${config.writeTable} w
-                WHERE 1=1
-                  ${baseUrlColumnExists ? 'AND baseurl = ${baseUrl}' : ''}
-                  ${pathColumnExists ? 'AND path = ${path}' : ''}
+              ? `DELETE FROM ${config.schema}.${config.writeTable}
+              WHERE (${columnsForDeletes}) NOT IN (
+                SELECT ${columnsForDeletes} FROM ${tempTableNameForUpdates}
+              )
+              ${baseUrlColumnExists ? 'AND baseurl = ${baseUrl}' : ''}
+              ${pathColumnExists ? 'AND path = ${path}' : ''}
               `
+              // Fullsync Version that deletes all of them, instead of just the missing ones...
+              // `DELETE FROM ${config.schema}.${config.writeTable} w
+              //     WHERE 1=1
+              //       ${baseUrlColumnExists ? 'AND baseurl = ${baseUrl}' : ''}
+              //       ${pathColumnExists ? 'AND path = ${path}' : ''}
+              //   `
               : `DELETE FROM ${config.schema}.${config.writeTable} w
                   USING ${tempTableNameForDeletes} t
                   WHERE w.href = t.href
@@ -916,7 +1078,7 @@ const dbFactory = function dbFactory(configObject = {}) {
             `DELETE w FROM [${config.schema}].[${config.writeTable}] w
               WHERE NOT EXISTS (
                 SELECT 1
-                FROM [dbo].[I_API_Test_Fre] i
+                FROM [${tempTableNameForSafeDeltaSync}] i
                 WHERE i.[href] = w.[href]
                   ${baseUrlColumnExists ? 'AND i.baseurl = w.baseurl' : ''}
                   ${pathColumnExists ? 'AND i.path = w.path' : ''}
@@ -1160,6 +1322,7 @@ const dbFactory = function dbFactory(configObject = {}) {
     commitTransaction,
     rollbackTransaction,
   };
+
   return db;
 };
 
@@ -1321,37 +1484,50 @@ function Sri2DbFactory(configObject = {}) {
 
 
   // Create the necessary functions
-  let lastSyncDate = null;
-  const safetyWindow = 24 * 60 * 60 * 1000; // 24 hours
+  const lastSyncDates = {};
+  // const safetyWindow = 24 * 60 * 60 * 1000; // 24 hours
   /**
    * Gets the last known sync date for this process (fetch from DB - a safety window if none known or set)
-   * @param {*} rounded = true will return the lower second (floor)
+   * @param {String} syncType can be FULL, DELTA, SAFEDELTA
+   *   because we keep track of seperate last sync times per sync type
+   * @param {*} rounded [OBSOLETE] = true will return the lower second (floor)
    *   if you need second instead of millisecond precision
    */
-  const getSafeLastSyncDate = async function getLastSyncDate(rounded = false) {
+  const getLastSyncDates = async function getLastSyncDates(syncType = 'DELTA') {
     // console.log(`getLastSyncDate ${config.api.baseUrl}`);
 
     // store it in memory, but if it's not initialized, you might need
     // to do a single SELECT on the database
-    lastSyncDate = lastSyncDate
-      || new Date(
-        ((await db.getLastSyncDate(config.api.path)) || new Date('1900-01-02')).getTime()
-          - safetyWindow
-        ,
-      );
-    return rounded
-      ? new Date(Math.floor((lastSyncDate.getTime() / 1000) * 1000))
-      : lastSyncDate;
+    lastSyncDates[syncType] = lastSyncDates[syncType]
+      || await db.getLastSyncDates(syncType)
+      || { lastModified: new Date('1900-01-01').getTime() /* .getTime() - safetyWindow */, syncStart: null };
+    return lastSyncDates[syncType];
+
+    // [OBSOLETE]
+    // return rounded
+    //   ? new Date(Math.floor((lastSyncDates[syncType].getTime() / 1000) * 1000))
+    //   : lastSyncDates[syncType];
   };
 
   /**
    * Sets the last known sync date.
    *
-   * @param {Date} d
+   * @param {String} syncType can be FULL, DELTA, SAFEDELTA
+   *   because we keep track of seperate last sync times per sync type
+   * @param {Number} mostRecent$$MetaModifiedTimestamp the most recent $$meta.modified date in any
+   *   of the synced resources (in API time)
+   * @param {Number} mostRecentSyncStartTimestamp the most recent $$meta.modified date in any
+   *   of the synced resources (in API time)
    */
-  function setLastSyncDate(d) {
-    if (d instanceof Date) lastSyncDate = d;
-    else throw new Error('setLastSyncDate expects a Date parameter');
+  function setLastSyncTimestamps(syncType, mostRecent$$MetaModifiedTimestamp, mostRecentSyncStartTimestamp) {
+    if (Number.isInteger(mostRecent$$MetaModifiedTimestamp)) {
+      lastSyncDates[syncType] = {
+        lastModified: mostRecent$$MetaModifiedTimestamp,
+        syncStart: mostRecentSyncStartTimestamp,
+      };
+    } else {
+      throw new Error('setLastSyncTimestamps expects an Integer parameter');
+    }
   }
 
 
@@ -1373,7 +1549,6 @@ function Sri2DbFactory(configObject = {}) {
    *
    * @param {*} modifiedSince if UNDEFINED it will use lastSyncDate and NULL will be equivalent to a full-sync?
    */
-  let beforePreviousSync = null;
   // let queuedSyncPromise = null;
   // syncPromises = object where keys = paramsAsString and values = an array of promises (currentSync and queuedSync)
   // let syncPromises = {}
@@ -1383,179 +1558,188 @@ function Sri2DbFactory(configObject = {}) {
     async function innerSync() {
       const beforeSync = Date.now();
 
-      try {
-        const isFullSync = modifiedSince === null;
-        const isSafeDeltaSync = !isFullSync && safeDeltaSync;
-        console.log(`${isFullSync ? 'FULL' : 'DELTA'} sync ${config.api.baseUrl}${config.api.path}`);
+      const isFullSync = modifiedSince === null;
+      const isSafeDeltaSync = !isFullSync && safeDeltaSync;
+      let syncTypeString = 'DELTA'; // unless it's something else
+      if (isFullSync) syncTypeString = 'FULL';
+      if (isSafeDeltaSync) syncTypeString = 'SAFEDELTA';
 
-        let modifiedSinceString = null;
-        if (modifiedSince === undefined) {
-          modifiedSinceString = moment(await getSafeLastSyncDate())/* .subtract(10, 'seconds') */
-            .toISOString();
-        } else if (modifiedSince === null) {
-          //= > full sync
-        } else {
-          modifiedSinceString = moment(modifiedSince).toISOString();
+      console.log(`${isFullSync ? 'FULL' : 'DELTA'} sync ${config.api.baseUrl}${config.api.path}`);
+
+      const previousSyncTimestamps = await getLastSyncDates(syncTypeString);
+      let modifiedSinceString = null;
+      if (modifiedSince === undefined) {
+        modifiedSinceString = new Date(previousSyncTimestamps.lastModified)/* .subtract(10, 'seconds') */
+          .toISOString();
+      } else if (modifiedSince === null) {
+        // => full sync
+      } else {
+        modifiedSinceString = new Date(modifiedSince).toISOString();
+      }
+
+      // const path = `${config.api.baseUrl}${config.api.path}${config.api.path.includes('?') ? '&' : '?'}$$meta.deleted=any&modifiedSince=${modifiedSinceString}`;
+      const limit = config.api.limit || 500;
+      // old version with &&meta.deleted=any
+      // const firstPath = `${config.api.path}${config.api.path.includes('?') ? '&' : '?'}limit=${limit}&$$meta.deleted=any${modifiedSinceString ? `&modifiedSince=${modifiedSinceString}` : ''}`;
+
+      const pathHasFilters = config.api.path.includes('?');
+      const pathWithoutFilters = config.api.path.split('?')[0];
+      const extraQueryParams = `limit=${limit}${modifiedSinceString ? `&modifiedSince=${modifiedSinceString}` : ''}`;
+      const pathHasExpandFilter = pathHasFilters && config.api.path.includes('expand=');
+
+      const updatedResourcesPath = `${config.api.path}${pathHasFilters ? '&' : '?'}${extraQueryParams}${pathHasExpandFilter ? '' : '&expand=FULL'}`;
+      // Be careful: because of modifications to a resource, it might fall out of a filtered list
+      // For example: after changing a person's gender, some person might disappear from
+      // /persons?gender=FEMALE
+      // So for deleted resources, we want to know about ALL deletions, not just the ones from
+      // the configured filtered list, which is why we remove the url part after the first '?'
+      const deletedResourcesPath = `${pathWithoutFilters}?${extraQueryParams}&$$meta.deleted=true&expand=NONE`;
+
+
+      // in case of a SAFE sync (only relevant if pathHasFilters)
+      // we also should remove 'Bo' from the table, if his/her gender was changed, and he/she now
+      // doesn't belong to /persons?gender=FEMALE anymore
+      // We will do this by getting only the keys that are part of the list, and then removing from
+      // the db any record not in that list.
+      // We should also figure out this way the ones that we didn't have in the DB yet, then fetch
+      // and insert them
+      const filteredNonExpandedPath = setExpandOnPath(`${config.api.path}${pathHasFilters ? '&' : '?'}limit=*`, 'NONE');
+
+
+      let totalCount = 0;
+      let lastModified = '';
+
+      const dbTransaction = await db.openTransaction();
+      try {
+        // only needs to be awaited when we want to actually store stuff in the DB,
+        // so we can start doing API requests before it is settled!
+        const tempTablesInitializededPromise = db.createTempTables(dbTransaction);
+
+        const beforeApiCalls = Date.now();
+
+        // first delete (real deletions)
+        if (!isFullSync && !isSafeDeltaSync) {
+          await applyFunctionToList(async (hrefs, isLastPage, pageNum, count) => {
+            console.log(`[page ${pageNum}] Trying to store ${hrefs.length} records on the DB for deletion (${count} done so far)`);
+            await tempTablesInitializededPromise; // make sure temp tables have been created by now
+            await db.deleteApiResultsFromDb(hrefs, dbTransaction);
+            // lastModified = resources.reduce(
+            //   (acc, cur) => (cur.$$meta.modified > acc ? cur.$$meta.modified : acc),
+            //   lastModified,
+            // );
+            // console.log('  Most recent lastmodified seen so far:', lastModified);
+            console.log(`Synced ${count + hrefs.length} api resources so far in ${elapsedTimeString(beforeSync, 'm', count, 's')}.`);
+
+            if (isLastPage) totalCount += count + hrefs.length;
+          },
+          deletedResourcesPath, { nextLinksBroken: config.api.nextLinksBroken });
         }
 
-        // const path = `${config.api.baseUrl}${config.api.path}${config.api.path.includes('?') ? '&' : '?'}$$meta.deleted=any&modifiedSince=${modifiedSinceString}`;
-        const limit = config.api.limit || 500;
-        // old version with &&meta.deleted=any
-        // const firstPath = `${config.api.path}${config.api.path.includes('?') ? '&' : '?'}limit=${limit}&$$meta.deleted=any${modifiedSinceString ? `&modifiedSince=${modifiedSinceString}` : ''}`;
+        // then insert or update
+        await applyFunctionToList(async (resources, isLastPage, pageNum, count) => {
+          console.log(`[page ${pageNum}] Trying to store ${resources.length} records on the DB for update/insert (${count} done so far)`);
 
-        const pathHasFilters = config.api.path.includes('?');
-        const pathWithoutFilters = config.api.path.split('?')[0];
-        const extraQueryParams = `limit=${limit}${modifiedSinceString ? `&modifiedSince=${modifiedSinceString}` : ''}`;
-        const pathHasExpandFilter = pathHasFilters && config.api.path.includes('expand=');
+          // some old API's are missing $$meta.modified or even key
+          const resourcesToStore = resources.map(r => fixResourceForStoring(r));
+          await tempTablesInitializededPromise; // make sure temp tables have been created by now
+          await db.saveApiResultsToDb(resourcesToStore, dbTransaction);
+          lastModified = resourcesToStore.reduce(
+            (acc, cur) => (cur.$$meta.modified > acc ? cur.$$meta.modified : acc),
+            lastModified,
+          );
+          // console.log('  Most recent lastmodified seen so far:', lastModified);
+          console.log(`Synced ${count + resources.length} api resources so far in ${elapsedTimeString(beforeSync, 'm', count, 's')}.`);
 
-        const updatedResourcesPath = `${config.api.path}${pathHasFilters ? '&' : '?'}${extraQueryParams}${pathHasExpandFilter ? '' : '&expand=FULL'}`;
-        // Be careful: because of modifications to a resource, it might fall out of a filtered list
-        // For example: after changing a person's gender, some person might disappear from
-        // /persons?gender=FEMALE
-        // So for deleted resources, we want to know about ALL deletions, not just the ones from
-        // the configured filtered list, which is why we remove the url part after the first '?'
-        const deletedResourcesPath = `${pathWithoutFilters}?${extraQueryParams}&$$meta.deleted=true&expand=NONE`;
+          if (isLastPage) totalCount += count + resources.length;
+        },
+        updatedResourcesPath, { nextLinksBroken: config.api.nextLinksBroken });
 
+        // UPDATE STUFF IN THE DB
+        await tempTablesInitializededPromise; // make sure temp tables have been created by now
+        await db.copyTempTablesDataToWriteTable(dbTransaction, isFullSync);
 
-        // in case of a SAFE sync (only relevant if pathHasFilters)
-        // we also should remove 'Bo' from the table, if his/her gender was changed, and he/she now
-        // doesn't belong to /persons?gender=FEMALE anymore
-        // We will do this by getting only the keys that are part of the list, and then removing from
-        // the db any record not in that list.
-        // We should also figure out this way the ones that we didn't have in the DB yet, then fetch
-        // and insert them
-        const filteredNonExpandedPath = setExpandOnPath(`${config.api.path}${pathHasFilters ? '&' : '?'}limit=*`, 'NONE');
-
-
-        let totalCount = 0;
-        let lastModified = '';
-
-        const dbTransaction = await db.openTransaction();
-        try {
-          // only needs to be awaited when we want to actually store stuff in the DB,
-          // so we can start doing API requests before it is settled!
-          const tempTablesInitializededPromise = db.createTempTables(dbTransaction);
-
-          const beforeApiCalls = Date.now();
-
-          // first delete (real deletions)
-          if (!isFullSync && !isSafeDeltaSync) {
-            await applyFunctionToList(async (hrefs, isLastPage, pageNum, count) => {
-              console.log(`[page ${pageNum}] Trying to store ${hrefs.length} records on the DB for deletion (${count} done so far)`);
-              await tempTablesInitializededPromise; // make sure temp tables have been created by now
-              await db.deleteApiResultsFromDb(hrefs, dbTransaction);
-              // lastModified = resources.reduce(
-              //   (acc, cur) => (cur.$$meta.modified > acc ? cur.$$meta.modified : acc),
-              //   lastModified,
-              // );
-              // console.log('  Most recent lastmodified seen so far:', lastModified);
-              console.log(`Synced ${count + hrefs.length} api resources so far in ${elapsedTimeString(beforeSync, 'm', count, 's')}.`);
-
-              if (isLastPage) totalCount += count + hrefs.length;
-            },
-            deletedResourcesPath, { nextLinksBroken: config.api.nextLinksBroken });
-          }
-
+        // for the SAFE delta sync, there is some extra work left
+        if (isSafeDeltaSync) {
           // then insert or update
           await applyFunctionToList(async (resources, isLastPage, pageNum, count) => {
-            console.log(`[page ${pageNum}] Trying to store ${resources.length} records on the DB for update/insert (${count} done so far)`);
-
-            // some old API's are missing $$meta.modified or even key
-            const resourcesToStore = resources.map(r => fixResourceForStoring(r));
-            await tempTablesInitializededPromise; // make sure temp tables have been created by now
-            await db.saveApiResultsToDb(resourcesToStore, dbTransaction);
-            lastModified = resourcesToStore.reduce(
-              (acc, cur) => (cur.$$meta.modified > acc ? cur.$$meta.modified : acc),
-              lastModified,
-            );
-            // console.log('  Most recent lastmodified seen so far:', lastModified);
-            console.log(`Synced ${count + resources.length} api resources so far in ${elapsedTimeString(beforeSync, 'm', count, 's')}.`);
-
-            if (isLastPage) totalCount += count + resources.length;
+            console.log(`[page ${pageNum}] Trying to store ${resources.length} records on the DB for safe delta sync (${count} done so far)`);
+            await db.saveSafeSyncApiResultsToDb(resources, dbTransaction);
+            console.log(`Synced ${count + resources.length} api hrefs so far in ${elapsedTimeString(beforeSync, 'm', count, 's')}.`);
           },
-          updatedResourcesPath, { nextLinksBroken: config.api.nextLinksBroken });
+          filteredNonExpandedPath, { nextLinksBroken: config.api.nextLinksBroken });
 
-          // UPDATE STUFF IN THE DB
-          await tempTablesInitializededPromise; // make sure temp tables have been created by now
-          await db.copyTempTablesDataToWriteTable(dbTransaction, isFullSync);
+          console.log('Trying to find missing hrefs in the DB that need to be fetched.');
+          // fetch all records from the API that have become a part of the list recently,
+          // but not because of a recent update of the resource itself (those would have been
+          // found already with modifiedSince)
+          const hrefsToFetch = await db.findSafeSyncMissingHrefs(dbTransaction);
+          if (hrefsToFetch.length > 0) {
+            console.log(`Trying to fetch ${hrefsToFetch.length} resources from API`);
+            const beforeFetch = Date.now();
+            const resourcesToStore = (await getAllHrefs(hrefsToFetch, {}, config.api.batchPath))
+              .map(r => fixResourceForStoring(r));
 
-          // for the SAFE delta sync, there is some extra work left
-          if (isSafeDeltaSync) {
-            // then insert or update
-            await applyFunctionToList(async (resources, isLastPage, pageNum, count) => {
-              console.log(`[page ${pageNum}] Trying to store ${resources.length} records on the DB for safe delta sync (${count} done so far)`);
-              await db.saveSafeSyncApiResultsToDb(resources, dbTransaction);
-              console.log(`Synced ${count + resources.length} api hrefs so far in ${elapsedTimeString(beforeSync, 'm', count, 's')}.`);
-            },
-            filteredNonExpandedPath, { nextLinksBroken: config.api.nextLinksBroken });
-
-            console.log('Trying to find missing hrefs in the DB that need to be fetched.');
-            // fetch all records from the API that have become a part of the list recently,
-            // but not because of a recent update of the resource itself (those would have been
-            // found already with modifiedSince)
-            const hrefsToFetch = await db.findSafeSyncMissingHrefs(dbTransaction);
-            if (hrefsToFetch.length > 0) {
-              console.log(`Trying to fetch ${hrefsToFetch.length} resources from API`);
-              const beforeFetch = Date.now();
-              const resourcesToStore = (await getAllHrefs(hrefsToFetch, {}, config.api.batchPath))
-                .map(r => fixResourceForStoring(r));
-
-              console.log(`Fetched ${resourcesToStore.length} resources from API in ${elapsedTimeString(beforeFetch, 'm', resourcesToStore.length, 's')}.`);
-              await db.saveSafeSyncMissingApiResultsToDb(
-                resourcesToStore.map(r => (r.$$expanded || r)),
-              );
-            } else {
-              console.log(`No resources to fetch from API (${hrefsToFetch.length} missing hrefs)`);
-            }
-            // after filling the DB with the necessary info also copy the stuff in the temp
-            // tables to the actual tables
-            // = delete records from DB that are NOT IN THE LIST ANYMORE & insert MISSING records
-            await db.copySafeSyncTempTablesDataToWriteTable(dbTransaction);
-          }
-
-          if (config.dryRun) {
-            console.log('Not committing transaction because dryRun');
-            db.rollbackTransaction(dbTransaction);
+            console.log(`Fetched ${resourcesToStore.length} resources from API in ${elapsedTimeString(beforeFetch, 'm', resourcesToStore.length, 's')}.`);
+            await db.saveSafeSyncMissingApiResultsToDb(
+              resourcesToStore.map(r => (r.$$expanded || r)),
+            );
           } else {
-            await db.commitTransaction(dbTransaction);
+            console.log(`No resources to fetch from API (${hrefsToFetch.length} missing hrefs)`);
           }
-
-          const syncDuration = Date.now() - beforeApiCalls;
-          // potentially we have seen results that were too recent (popping up while we were syncing),
-          // so subtract the duration of the sync * 1.01 (1.01 to overcompensate for any clock
-          // differences between our machine and the server) from the most recent 'modified' date
-          // ALSO look at the delta between the start of the current and the previous sync,
-          // because we can safely add this delta * 0.99 (0.99 to overcompensate for any clock
-          // differences between our machine and the server)
-          const timeBetweenThisAndPreviousSync = beforePreviousSync ? (beforeSync - beforePreviousSync) : 0;
-          if (lastModified && lastModified.length > 0) {
-            setLastSyncDate(new Date(Date.parse(lastModified)
-              - Math.round(syncDuration * 1.01)
-              + Math.round(timeBetweenThisAndPreviousSync * 0.99)));
-          } else {
-            const previousLastSyncDate = await getSafeLastSyncDate();
-            const newLastSyncDate = new Date((modifiedSince || previousLastSyncDate.getTime())
-              + Math.round(timeBetweenThisAndPreviousSync * 0.99));
-            console.log(`Updating LAST SYNC DATE from ${previousLastSyncDate.toISOString()} to ${newLastSyncDate.toISOString()}`);
-            setLastSyncDate(newLastSyncDate);
-          }
-          console.log('==== New LAST SYNC DATE =', (await getSafeLastSyncDate()).toISOString());
-
-          console.log(`Synced ${totalCount} api resources in ${elapsedTimeString(beforeSync, 'm', totalCount, 's')}.`);
-
-          // elapsedTimeCalculations(beforeSync, 'm', totalCount, 's');
-          return { ...elapsedTimeCalculations(beforeSync, 'm', totalCount, 's'), config: clonedeep(config) };
-        } catch (e) {
-          console.warn(`Problem while doing ${isFullSync ? 'FULL' : 'DELTA'} sync`, e, e.stack);
-          if (e instanceof SriClientError) {
-            console.warn(JSON.stringify(e, null, 2));
-          }
-          db.rollbackTransaction(dbTransaction);
-          throw e;
+          // after filling the DB with the necessary info also copy the stuff in the temp
+          // tables to the actual tables
+          // = delete records from DB that are NOT IN THE LIST ANYMORE & insert MISSING records
+          await db.copySafeSyncTempTablesDataToWriteTable(dbTransaction);
         }
-      } finally {
-        // if (!modifiedSince)
-        beforePreviousSync = beforeSync;
+
+        if (config.dryRun) {
+          console.log('Not committing transaction because dryRun');
+          db.rollbackTransaction(dbTransaction);
+        } else {
+          await db.commitTransaction(dbTransaction);
+        }
+
+        // only update internal lastSyncDate if method was called without specific modifiedSince
+        if (!modifiedSince) {
+          const syncDuration = Date.now() - beforeApiCalls;
+          // * potentially we have seen results that were too recent (popping up while we were
+          //   syncing), so subtract the duration of the sync * 1.01 (1.01 to overcompensate
+          //   for any clock differences between our machine and the server) from the most recent
+          //   'modified' date found in the list of results
+          // * ALSO look at the delta between the start of the current and the previous sync,
+          //   because we can safely add this delta to the previous modifiedSince (* 0.99 to
+          //   overcompensate for any clock differences between our machine and the server)
+          // => We'll take the highest value of both of these
+          const timeBetweenThisAndPreviousSync = previousSyncTimestamps.syncStart ? (beforeSync - previousSyncTimestamps.syncStart) : 0;
+          let newLastModifiedTimestamp = null;
+          if (lastModified && lastModified.length > 0) {
+            const prevLastModified = previousSyncTimestamps.lastModified;
+            newLastModifiedTimestamp = Math.max(
+              Date.parse(lastModified) - Math.round(syncDuration * 1.01),
+              prevLastModified - Math.round(syncDuration * 1.01)
+                + Math.round(timeBetweenThisAndPreviousSync * 0.99),
+            );
+            console.log(`Updating ${syncTypeString} LAST SYNC DATE from ${new Date(prevLastModified).toISOString()} to ${new Date(newLastModifiedTimestamp).toISOString()}`);
+          } else {
+            // no records found? no need to increase modifiedSince next time
+            newLastModifiedTimestamp = previousSyncTimestamps.lastModified;
+          }
+          setLastSyncTimestamps(syncTypeString, newLastModifiedTimestamp, beforeSync);
+          await db.setLastSyncTimestamps(syncTypeString, newLastModifiedTimestamp, beforeSync);
+
+          console.log(`==== New ${syncTypeString} LAST SYNC DATES = { lastModified: ${new Date(newLastModifiedTimestamp).toISOString()}, syncStart: ${new Date(beforeSync).toISOString()} }`);
+        }
+        console.log(`Synced ${totalCount} api resources in ${elapsedTimeString(beforeSync, 'm', totalCount, 's')}.`);
+
+        // elapsedTimeCalculations(beforeSync, 'm', totalCount, 's');
+        return { ...elapsedTimeCalculations(beforeSync, 'm', totalCount, 's'), config: clonedeep(config) };
+      } catch (e) {
+        console.warn(`Problem while doing ${isFullSync ? 'FULL' : 'DELTA'} sync`, e, e.stack);
+        if (e instanceof SriClientError) {
+          console.warn(JSON.stringify(e, null, 2));
+        }
+        db.rollbackTransaction(dbTransaction);
+        throw e;
       }
     }
 
@@ -1741,7 +1925,7 @@ function Sri2DbFactory(configObject = {}) {
 
   // Now create and return the object containing the necessary functions for the user to use
   return {
-    getSafeLastSyncDate,
+    getLastSyncDates,
     fullSync,
     deltaSync,
     safeDeltaSync,
