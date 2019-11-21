@@ -231,7 +231,7 @@ Client.prototype.logMessage = function(message) {
 
 const removeDollarFields = (obj) => {
     Object.keys(obj).forEach( property => {
-        if (property.startsWith("$$") && property!='$$meta') {
+        if (property.startsWith("$$") && property!='$$meta' && property!='$$startDate' && property!='$$endDate') {
             delete obj[property]
         } else  {
             if (obj.property !== null && typeof obj.property === 'object') {
