@@ -1,245 +1,261 @@
 # sri2postgres
 
-This is a module to sync any SRI interface to one database table in a postgres 9.4 instance.
-The SRI specification can [be found here](https://github.com/dimitrydhondt/sri).
+This is a module to sync any SRI interface to a database table in a postgres 9.4 or up instance or to a somewhat recent MSSQL instance.
+The SRI specification can [be found here](https://github.com/katholiek-onderwijs-vlaanderen/sri).
 
 
 # Installing
 
 Installation is simple using npm :
 
-    $ cd [your_project]
-    $ npm install --save sri2postgres
+    $ npm install https://github.com/katholiek-onderwijs-vlaanderen/sri2postgres
 
 
-#About
+# About
 
-The main idea of this module is to read all resources from an Api and store them into a database in json format.
-A resource is basically a json object with attributes, like an school or a file or maybe a car.
+The main idea of this module is to read all resources from an API and store them into a database in json format.
+A resource is basically a json object with attributes, like a school or a file or maybe a car.
 
 
 # Usage
 
 Start by requiring the module in your code. 
     
-    var Sri2postgres = require('sri2postgres');
-    
-Then you will need to tell which api and which database trough a config file:
+```
+const { Sri2Db, Sri2DbMulti } = require('sri2postgres');
+```
 
-    var config    = {
-        "baseApiUrl" : "http://dump.getpostman.com",
-        "functionApiUrl" : "/status",
-        "dbUser": "admin",
-        "dbPassword": "admin",
-        "database": "postgres",
-        "dbPort": "5432",
-        "dbHost": "localhost",
-        "dbSsl": false
-    }
+## Sri2Db
 
-    var client = new Sri2postgres(config);
+Sri2Db is the base, that allows you to sync a single API endpoint to a database table.
 
-Now we are ready to start sync resources.
+You will need to configure which api and which database through a config file:
+
+```
+const sri2dbConfig = {
+    syncMethod: 'fullSync' | 'deltaSync' | 'safeDeltaSync', // to define the sync that will be executed when calling client.configuredSync()
+    dryRun: false, // true would rollback transactions to simply check if it all works
+    broadcastUrl: "https://some-broadcast-api.herokuapp.com/", // if you want to trigger delta syncs based on live updates via socket.io
+    api: {
+        baseUrl: 'https://api.my.org',
+        path: '/persons', //could also be /persons?gender=FEMALE if you only want to sync part of a list
+        username: 'userthatcanreadallresources', // can be omitted if API is public
+        password: 'secret',                      // can be omitted if API is public
+        //headers: {}, //configure extra http headers if necessary
+        timeout: 30000,
+        nrOfRetries: 2,
+        limit: 2500,
+        //nextLinksBroken: true, //false by default but workaround with limit & offset if for some reason they don't work reliably
+        //deletedNotImplemented: true //false by default but skips sync of deleted for deltaSync (only needed for broken sri API's)
+    },
+    db: {
+        type: 'pg', // mssql also supported
+        host: 'ec2-something.eu-west-1.compute.amazonaws.com',
+        port: '5432',
+        database: 'dbname',
+        schema: 'public',
+        table: 'persons',
+        username: 'dbusername',
+        password: 'dbsecretpassword',
+        ssl: true,
+    },
+}
+
+const client = Sri2Db(sri2dbConfig);
+```
+
+Now we are ready to start syncing resources.
 
 
-## Function Definitions
+### Function Definitions
 
 Below is a description of the different types of functions that you can use.
 It describes the inputs and outputs of the different functions.
-Most of these function return a [Q promise](https://github.com/kriskowal/q).
+Most of these functions are async (returning a Promise).
 
 
-### connect
+You can do a full sync:
 
-This is a simple wrapper for pg.connect:
+```
+nrOfSyncedRecords = await client.fullSync();
+```
 
-    sri2postgres.connect(function (error) {
-        //once it is connected you can call others sri2postgres methods
-    });
+Or a delta sync, taking all modifications starting from the latest known sync date (using a safety overlap):
+
+```
+nrOfSyncedRecords = await client.deltaSync();
+```
+
+By calling this on a regular basis, it should be quite easy to stay in sync like every minute or so.
+
+```
+setInterval(client.deltaSync, 60000)
+```
+
+**'Safer' delta syncs**: by taking all modifications starting from the latest known modified date,
+you should theoretically always be in sync with the API, but care has to be taken **if you are only
+syncing a subset of an API** (like /persons?gender=FEMALE), as it comes with its own set of specific problems:
+ * even though a resource is not deleted but only updated, that update might have caused it to disappear from the list. In our example: when a person's gender is updated, it will not be a part of /persons?gender=FEMALE anymore. This is hard to detect if the delta sync only listens to 'updates' and 'deletes' 
+ * in some very specific cases, a record might have to disappear from a list because of a change in *another* resource. For example /persons?hasFemaleFriends=true might yield different results because of a gender change in another person that is not even a part of this list.
+
+It depends on your use-case if this information is very important. If you just want to have the latest version of a bunch of resources, and you don't care if your db contains a few unnecessary items, you should be ok with a simple delta-sync, trusting that a full-sync from time to time will clean up these unneeded records. However, if your application must know at all times which resources are and whch are not part of the list, the delta sync should be a bit more advanced. Mind you: there is a price to pay: both on the load on the API's as on the load on your own database, so you should probably only do this when it is important for your use-case.
+
+The safeDeltaSync method will also make sure that all resources that are not a part of a filtered list anymore are also removed from your DB, and the ones that have become part of the list now because of a change in another resource will be added. [NOT IMPLEMENTED YET]
+
+```
+nrOfSyncedRecords = await client.safeDeltaSync();
+```
 
 
-### saveResource
+*getLastSyncDates(syncType)* will return an object with 2 properties for the given syncType (DELTA, SAFEDELTA, FULL):
+ * syncStart: the point in time the last known succesful sync started measured by the client machine that was running Sri2DB (expressed as the number of milliseconds since 1970-01-01 00:00:00 UTC (Unix Epoch))
+ * lastModified: the next point in time that should be used (calculated conservatively) as a safe value for modifiedSince (expressed as the number of milliseconds since 1970-01-01 00:00:00 UTC (Unix Epoch)) 
 
-This is a q promise method and it allows you to save just ONE resource to the designed table. It perform an SQL UPSERT 
+Nevertheless: doing full syncs from time to time, or nightly syncs that sync everything from the last week or even the last month are always a good strategy.
 
-    sri2postgres.saveResource()
-    
-So if the resource already exit in the table it will be updated. Yo can try yourself by doing:
+If you want to know the date that will be used to send to the API (?modifiedSince=...) on the next run, you can call:
+```
+// first call will take it from the DB, after that it will be the internally calculated date
+const { syncStart, lastModified } = client.getLastSyncDates();
+```
 
-    sri2postgres.saveResource().then(sri2postgres.saveResource);
+You can also do a delta sync taking all modifications starting from a given point in time:
 
-### saveResources
+```
+nrOfSyncedRecords = await client.deltaSync('2019-07-16T07:44:00Z');
+```
 
-This is a q promise method that saves ALL resources from given api.
-First this method DELETE all content from the designed table. Then does an SQL TRANSACTION with n INSERT statements for each page of the API.
-Lets show you an example:
+But be aware that in this case the syncStart and lastModified will not be updated.
 
-Suppose we want to save all customers. Then our config json will look like:
+A delta sync will return immediately with a return value of 0 if another one is still running!
 
-    config.baseApiUrl = " http://api.mine.org/";
-    config.functionApiUrl = "/customers?limit=500";
-    config.dbTable = "shema.table";
-    ...
 
-##### About the table
+If you've configured the broadcast url, you can also start the listener, which will do a new delta sync anytime it gets a message:
 
-sri2postgres assumes that the schema.table you set in config follows this structure:
+```
+client.installBroadCastListeners();
+```
 
-    CREATE TABLE table (key uuid unique,value jsonb);
 
-It is also very important to understand that "limit" parameter determines the "n" number for INSERT statements of each TRANSACTION.
-If just one INSERT query cannot be done, the whole TRANSACTION (in this 500 resources) will not be saved.
-Once a TRANSACTION is finish the method will ask for the following page to the api ( in this case by asking http://api.mine.org/customers?limit=500&offset=500) until there are no more resource to save.
-Finally it tells you:
 
-- How many resources were saved.
-- How many resources were NOT saved.
 
-Code example:
+## Sri2DbMulti
 
-    sri2postgres.connect(function () {
-        sri2postgres.saveResources().then(function(result){
-            result.resourcesSync
-            result.resourcesNotSync
-        });
-    });
+Sri2DbMulti is building on top of Sri2Db to provide an easier way to sync multiple API endpoints into a database table.
+In the background it instantiates multiple Sri2Db clients each with their own configuration.
 
-In addition you can ask the client when last sync was:
+You will need to configure which api and which database through a config file:
 
-    sri2postgres.lastSync
-
-### saveResources(customFilter)
-
-sometimes you would like not to save all resources from an api, but someones that apply to one or more conditions.
-In this cases saveResources receives a customFilter object that works like an java interface. It MUST have a method isValid(resource) that return true or false.
-Let's show you an example:
-
-If your resources are cars like:
-
-    [
+```
+const sri2dbMultiConfig = {
+    baseConfig: {
+        ... //same as Sri2DConfig
+    },
+    overwrites: [
+        // a list of partial objects that only specify the properties that need to be overridden for that client
         {
-            key: uuid-1,
-            brand : 'Ford',
-            model: 'Focus',
-            color: 'RED'
+            syncMethod: "fullSync", //even if the baseConfig says do a deltaSync, specificy that this API has to do a fullSync (when calling configuredSync)
+            api: {
+                path: '/organisations', //this instance will sync the organisations API
+            }
         },
         {
-            key: uuid-2,
-            brand : 'Chevrolet',
-            model: 'Camaro',
-            color: 'YELLOW'
-        }
-    ]
-
-And you want to save just RED cars then you have to write your customFilter with, at least, this 3 mandatory methods:
-
-    function CustomFilter (){
-    
-        this.isValid = function (resource){
-    
-            return resource.color == 'RED';
-        };
-        
-        this.getKeyFrom = function(resource){
-            return resource.key;
-        };
-    
-        this.getValueFrom = function (resource) {
-        
-            // As I know that 'resource' is a JSON object I need to stringify it to be persisted on DB
-            
-            return JSON.stringify(resource);
-        };
-    };
-    
-    module.exports = CustomFilter;
-
-As you KNOW the resource you will be able to write your own filter as complex as you need.
-Usage can be:
-
-        var filterObject = new CustomFilter();
-
-        sri2postgres.saveResources(filterObject).then(function(result){
-            result.resourcesSync
-        });
-        
-###saveResourcesInProperty
-
-After calling saveResources() this method will allow you to get the content from a specific property (nested objects).
-We assume this property has as value a link to an api to get a resource.
-
-In the following example we want to obtain the content that engine property points to.
-
-    [
-        {
-            key: uuid-1,
-            brand : 'Ford',
-            model: 'Focus',
-            color: 'RED',
-            engine: 'https://myengine.api.com/engine-uuid-2
+            syncMethod: "fullSync", //even if the baseConfig says do a deltaSync, specificy that this API has to do a fullSync (when calling configuredSync)
+            api: {
+                path: '/subjects', //this instance will sync the subjects API
+            },
+            db: {
+                table: 'subjects_apisync_table' // we'll sync this api to a different database table
+            }
         },
-        {
-            key: uuid-2
-            brand : 'Chevrolet',
-            model: 'Camaro',
-            color: 'YELLOW',
-            engine: 'https://myengine.api.com/engine-uuid-3
-        }
-    ]
+    },
+    concurrency: 1 // if you want, you can allow multiple syncs to run in parallel
+}
 
-Before calling saveResourcesInProperty  we need to tell sri2postgres which attribute and which new table is going to use for this purpose.
-        
-        var propertyConfig = {
-            propertyName : "value->'engine'",
-            targetTable: "schema.engine_table"
-        };
+const multiClient = Sri2DbMulti(sri2dbMultiConfig);
+```
 
-Again a table like this will be required:
+### Function Definitions
 
-    CREATE TABLE engine_table (key uuid unique,value jsonb);
+You can call all the same functions as on a simple client: configuredSync (will run the configured syncMethod for each instance), but also fullSync, deltaSync and safeDeltaSync.
+```
+const results = await multiClient.configuredSync();
+```
 
-sri2postgres will insert it one by one.
+and the resutls will have the following structure:
+```
+[
+    { isFulfilled: true, isRejected: false, value: 4 }, // if the promise resolved
+    { isFulfilled: false, isRejected: true, reason: <Error object> }, // if the promise got rejected
+]
+```
+so you'll always know exactly which syncs have run correctly and which syncs haven't.
 
-So this code:
+## Database table layout
 
-    var propertyConfig = {
-        propertyName : "value->'engine'",
-        targetTable: "schema.car_engine",
-        queriesPerTransaction: 20
-    };
+Sri2db assumes that the schema.table you set in config has a specific set of columns (and column names)
 
-    sri2postgres.saveResources().then(function(){
+Next to that, a table named sri2db_synctimes will be created to keep track of the last sync times,
+in order to make sure that calling deltaSync and safeDeltaSync will automatically use a &modifiedSince=...
+parameter that makes sense. These values are updated in a very conservative way whithout making
+assumptions about the clocks of the client and database and the API being in sync. The only assumption
+being made is that the clock speed of the client machine and the API will not be off by more than 1%.
+
+### Postgres
+
+    CREATE TABLE sri2db_table (href varchar, jsondata jsonb, modified timestamptz, key varchar, resourcetype varchar, path varchar, baseurl varchar);
+
+    /* at the very least, create an unique index on href, but if you have path and baseurl in the table the index should contain these fields too */
+    CREATE UNIQUE INDEX sri2db_table_baseurl_path_href_idx ON table (baseurl, path, href);
+    -- or if no baseurl colomn
+    CREATE UNIQUE INDEX sri2db_table_path_href_idx ON sri2db_table (path, href);
+    -- or if no baseurl and no path column
+    CREATE UNIQUE INDEX sri2db_table_href_idx ON sri2db_table (href);
+
+    /* [DEPRECATED] and to quickly get the last sync date, a similar index on modified would also make sense */
+    CREATE INDEX sri2db_table_baseurl_path_modified_idx ON sri2db_table (baseurl, path, modified);
+    -- or if no baseurl colomn
+    CREATE INDEX sri2db_table_path_modified_idx ON sri2db_table (path, modified);
+    -- or if no baseurl and no path column
+    CREATE INDEX sri2db_table_modified_idx ON sri2db_table (modified);
+
+ * the 'key' column can also be of type uuid, but in case the key is not a uuid varchar would be a safer bet.
+ * the 'resourcetype' column is optional
+ * the 'path' column is optional but necessary if you want to store multiple paths (/persons and /organisationalunits) in the same table (multiple sri2db configs writing to the same table)
+ * the 'baseurl' column is optional but necessary if you want to store records from multiple baseurls (https://api.aaa.com and https://api.bbbbb.com) in the same table (multiple sri2db configs writing to the same table)
+ * In all honesty: the 'key' column could easily be made optional too, but I haven't done so yet.
+
+
+### MSSQL
+
+	CREATE TABLE sri2db_table (href varchar(1024) NOT NULL, jsondata nvarchar(MAX), modified datetime NOT NULL, [key] varchar(100) NOT NULL, /*resourcetype varchar(100) NOT NULL,*/ path varchar(1024) NOT NULL, baseurl varchar(1024) NOT NULL);
+
+    /* at the very least, create an unique index on href, but if you have path and baseurl in the table the index should contain these fields too */
+    CREATE UNIQUE INDEX sri2db_table_baseurl_path_href_idx ON table (baseurl, path, href);
+    -- or if no baseurl colomn
+    CREATE UNIQUE INDEX sri2db_table_path_href_idx ON sri2db_table (path, href);
+    -- or if no baseurl and no path column
+    CREATE UNIQUE INDEX sri2db_table_href_idx ON sri2db_table (href);
     
-        // As engine has its own api, we must set baseApiUrl to blank.
-        // Remember that sri2postgres will construct the full api url by doing: url = baseApiUrl + functionApiUrl
-        sri2postgres.baseApiUrl = '';
-    
-        sri2postgres.saveResourcesInProperty(propertyConfig).then(function(result){
-            result.resourcesSync
-            result.resourcesNotSync
-        });
-    });
+    /* [DEPRECATED] and to quickly get the last sync date, a similar index on modified would also make sense */
+    CREATE INDEX sri2db_table_baseurl_path_modified_idx ON sri2db_table (baseurl, path, modified);
+    -- or if no baseurl colomn
+    CREATE INDEX sri2db_table_path_modified_idx ON sri2db_table (path, modified);
+    -- or if no baseurl and no path column
+    CREATE INDEX sri2db_table_modified_idx ON sri2db_table (modified);
 
-Will Store:
 
-    CAR
-    +--------------+-------------------------------------------------------------------------------------------------------------------+
-    | key          | value                                                                                                             |
-    +--------------+-------------------------------------------------------------------------------------------------------------------+
-    | uuid-1       | {key: uuid-1,brand : 'Ford',model: 'Focus',color: 'RED',engine: 'https://myengine.api.com/engine-uuid-2}          |
-    | uuid-2       | {key: uuid-2,brand : 'Chevrolet',model: 'Camaro',color: 'YELLOW',engine: 'https://myengine.api.com/engine-uuid-3} |
-    +--------------+-------------------------------------------------------------------------------------------------------------------+
+ * the 'key' column can also be uuid, but in case the key is not a uuid varchar would be a safer bet.
+ * the 'resourcetype' column is optional
+ * the 'path' column is optional but necessary if you want to store multiple paths (/persons and /organisationalunits) in the same table (multiple sri2db configs writing to the same table)
+ * the 'baseurl' column is optional but necessary if you want to store records from multiple baseurls (https://api.aaa.com and https://api.bbbbb.com) in the same table (multiple sri2db configs writing to the same table)
+ * In all honesty: the 'key' column could easily be made optional too, but I haven't done so yet.
 
-    CAR_ENGINE
-    +--------------+-------------------------------------------------+
-    | key          | value                                           |
-    +--------------+-------------------------------------------------+
-    | uuid-1       | {key: 'engine-uuid-2', type : '1.6', HP: '150'} |
-    | uuid-2       | {key: 'engine-uuid-3', type : '2.0', HP: '200'} |
-    +--------------+-------------------------------------------------+
-    
 
-# Tests
+# Contributing
+
+## Tests THE NEXT PART IS OBSOLETE AS THE TESTS HAVE NOT BEEN UPDATED YET
+
 In order to run tests locally it is needed to install postgres 9.4 or superior in your machine.
 see http://stackoverflow.com/a/29415300
 
