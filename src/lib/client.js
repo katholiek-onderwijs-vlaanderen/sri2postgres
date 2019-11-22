@@ -5,6 +5,7 @@
 */
 
 // const request = require('requestretry');
+const util = require('util');
 const moment = require('moment');
 const clonedeep = require('lodash.clonedeep');
 const io = require('socket.io-client');
@@ -710,7 +711,7 @@ const dbFactory = function dbFactory(configObject = {}) {
               { name: 'path', value: config.path },
               { name: 'syncType', value: syncType },
             ]);
-          return result.length > 0 ? { lastModified: result[0].lastmodified, syncStart: result[0].syncstart } : null;
+          return result.length > 0 ? { lastModified: Number.parseInt(result[0].lastmodified), syncStart: result[0].syncstart } : null;
 
           // const result = await doQuery(myTransaction,
           //   `select modified
@@ -1556,6 +1557,9 @@ function Sri2DbFactory(configObject = {}) {
     // const paramsAsString = `${modifiedSince}|${safeDeltaSync}`
     // inner helper function that implements the actual sync
     async function innerSync() {
+      // if we store this, better would be to use the DB's date:
+      //  * MSSQL: select datediff_big(MILLISECOND, '1970-01-01', getutcdate())
+      //  * POSTGRES: select (extract(epoch from now()) * 1000)::bigint as now;
       const beforeSync = Date.now();
 
       const isFullSync = modifiedSince === null;
@@ -1859,7 +1863,7 @@ function Sri2DbFactory(configObject = {}) {
         // stop trying to connect
         clearInterval(retryConnectInterval);
 
-        socket.emit('join', config.api.path);
+        socket.emit('join', config.api.path.split('?')[0]);
       });
 
       socket.on('disconnect', () => {
@@ -1878,7 +1882,7 @@ function Sri2DbFactory(configObject = {}) {
       });
 
       socket.on('update', async (data) => {
-        console.log(`--- Audit/broadcast sent us a new message: ${data}, requesting new delta sync.`);
+        console.log(`--- Audit/broadcast sent us a new message: ${util.inspect(data)}, requesting new delta sync.`);
 
         const syncMethod = doSafeDeltaSync ? safeDeltaSync : deltaSync;
         try {
