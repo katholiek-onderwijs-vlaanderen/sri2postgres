@@ -64,7 +64,7 @@ function fixResourceForStoring(r) {
   }
   retVal = clonedeep(r);
   if (!(r.$$meta && r.$$meta.modified)) {
-    retVal.$$meta.modified = '2000-01-01';
+    retVal.$$meta.modified = new Date().toISOString();
   }
   if (!r.key && r.$$meta && r.$$meta.permalink) {
     retVal.key = r.$$meta.permalink.substring(r.$$meta.permalink.lastIndexOf('/') + 1);
@@ -607,6 +607,12 @@ const dbFactory = function dbFactory(configObject = {}) {
 
 
       const createLastSyncTimesTableResults = await createLastSyncTimesTableIfNecessary(transaction);
+
+      if (mssql) {
+        // TODO?
+      } else if (pg) {
+        transaction.query(`SET search_path TO ${config.schema},public;`);
+      }
 
       initialized = true;
     }
@@ -1622,7 +1628,7 @@ function Sri2DbFactory(configObject = {}) {
         const beforeApiCalls = Date.now();
 
         // first delete (real deletions)
-        if (!isFullSync && !isSafeDeltaSync) {
+        if (!isFullSync && !isSafeDeltaSync && !config.api.deletedNotImplemented) {
           await applyFunctionToList(async (hrefs, isLastPage, pageNum, count) => {
             console.log(`[page ${pageNum}] Trying to store ${hrefs.length} records on the DB for deletion (${count} done so far)`);
             await tempTablesInitializededPromise; // make sure temp tables have been created by now

@@ -21,9 +21,9 @@ A resource is basically a json object with attributes, like a school or a file o
 
 Start by requiring the module in your code. 
     
-<code>
+```
 const { Sri2Db, Sri2DbMulti } = require('sri2postgres');
-</code>
+```
 
 ## Sri2Db
 
@@ -31,7 +31,7 @@ Sri2Db is the base, that allows you to sync a single API endpoint to a database 
 
 You will need to configure which api and which database through a config file:
 
-<code>
+```
 const sri2dbConfig = {
     syncMethod: 'fullSync' | 'deltaSync' | 'safeDeltaSync', // to define the sync that will be executed when calling client.configuredSync()
     dryRun: false, // true would rollback transactions to simply check if it all works
@@ -46,6 +46,7 @@ const sri2dbConfig = {
         nrOfRetries: 2,
         limit: 2500,
         //nextLinksBroken: true, //false by default but workaround with limit & offset if for some reason they don't work reliably
+        //deletedNotImplemented: true //false by default but skips sync of deleted for deltaSync (only needed for broken sri API's)
     },
     db: {
         type: 'pg', // mssql also supported
@@ -61,7 +62,7 @@ const sri2dbConfig = {
 }
 
 const client = Sri2Db(sri2dbConfig);
-</code>
+```
 
 Now we are ready to start syncing resources.
 
@@ -75,21 +76,21 @@ Most of these functions are async (returning a Promise).
 
 You can do a full sync:
 
-<code>
+```
 nrOfSyncedRecords = await client.fullSync();
-</code>
+```
 
 Or a delta sync, taking all modifications starting from the latest known sync date (using a safety overlap):
 
-<code>
+```
 nrOfSyncedRecords = await client.deltaSync();
-</code>
+```
 
 By calling this on a regular basis, it should be quite easy to stay in sync like every minute or so.
 
-<code>
+```
 setInterval(client.deltaSync, 60000)
-</code>
+```
 
 **'Safer' delta syncs**: by taking all modifications starting from the latest known modified date,
 you should theoretically always be in sync with the API, but care has to be taken **if you are only
@@ -101,9 +102,9 @@ It depends on your use-case if this information is very important. If you just w
 
 The safeDeltaSync method will also make sure that all resources that are not a part of a filtered list anymore are also removed from your DB, and the ones that have become part of the list now because of a change in another resource will be added. [NOT IMPLEMENTED YET]
 
-<code>
+```
 nrOfSyncedRecords = await client.safeDeltaSync();
-</code>
+```
 
 
 *getLastSyncDates(syncType)* will return an object with 2 properties for the given syncType (DELTA, SAFEDELTA, FULL):
@@ -113,16 +114,16 @@ nrOfSyncedRecords = await client.safeDeltaSync();
 Nevertheless: doing full syncs from time to time, or nightly syncs that sync everything from the last week or even the last month are always a good strategy.
 
 If you want to know the date that will be used to send to the API (?modifiedSince=...) on the next run, you can call:
-<code>
+```
 // first call will take it from the DB, after that it will be the internally calculated date
 const { syncStart, lastModified } = client.getLastSyncDates();
-</code>
+```
 
 You can also do a delta sync taking all modifications starting from a given point in time:
 
-<code>
+```
 nrOfSyncedRecords = await client.deltaSync('2019-07-16T07:44:00Z');
-</code>
+```
 
 But be aware that in this case the syncStart and lastModified will not be updated.
 
@@ -131,9 +132,9 @@ A delta sync will return immediately with a return value of 0 if another one is 
 
 If you've configured the broadcast url, you can also start the listener, which will do a new delta sync anytime it gets a message:
 
-<code>
+```
 client.installBroadCastListeners();
-</code>
+```
 
 
 
@@ -145,7 +146,7 @@ In the background it instantiates multiple Sri2Db clients each with their own co
 
 You will need to configure which api and which database through a config file:
 
-<code>
+```
 const sri2dbMultiConfig = {
     baseConfig: {
         ... //same as Sri2DConfig
@@ -172,22 +173,22 @@ const sri2dbMultiConfig = {
 }
 
 const multiClient = Sri2DbMulti(sri2dbMultiConfig);
-</code>
+```
 
 ### Function Definitions
 
 You can call all the same functions as on a simple client: configuredSync (will run the configured syncMethod for each instance), but also fullSync, deltaSync and safeDeltaSync.
-<code>
+```
 const results = await multiClient.configuredSync();
-</code>
+```
 
 and the resutls will have the following structure:
-<code>
+```
 [
     { isFulfilled: true, isRejected: false, value: 4 }, // if the promise resolved
     { isFulfilled: false, isRejected: true, reason: <Error object> }, // if the promise got rejected
 ]
-</code>
+```
 so you'll always know exactly which syncs have run correctly and which syncs haven't.
 
 ## Database table layout
