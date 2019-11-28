@@ -966,13 +966,13 @@ const dbFactory = function dbFactory(configObject = {}) {
               ${resourceTypeColumnExists ? ', t.resourcetype' : ''}
               ${baseUrlColumnExists ? ', t.baseurl' : ''}
               ${pathColumnExists ? ', t.path' : ''}
-            FROM (select *,
-                  ROW_NUMBER() over (partition by
+            FROM (SELECT *,
+                    ROW_NUMBER() over (partition by
                         ${baseUrlColumnExists ? 'baseurl,' : ''}
                         ${pathColumnExists ? 'path,' : ''}
                         href
                       ORDER BY modified DESC) as rowNumber
-                  from [${tempTableNameForUpdates}]) t
+                  FROM [${tempTableNameForUpdates}]) t
             WHERE t.rowNumber = 1
               AND NOT EXISTS (
                 select 1 from [${config.schema}].[${config.writeTable}] w
@@ -1055,14 +1055,21 @@ const dbFactory = function dbFactory(configObject = {}) {
               ${resourceTypeColumnExists ? ', resourcetype' : ''}
               ${baseUrlColumnExists ? ', baseurl' : ''}
               ${pathColumnExists ? ', path' : ''}
-            FROM ${tempTableNameForUpdates} t
-            WHERE
-              NOT EXISTS (
+            FROM (SELECT *,
+                    ROW_NUMBER() OVER (partition by
+                      ${baseUrlColumnExists ? 'baseurl,' : ''}
+                      ${pathColumnExists ? 'path,' : ''}
+                      href
+                      ORDER BY modified DESC) as rowNumber
+                  FROM ${tempTableNameForUpdates}) t
+            WHERE t.rowNumber = 1
+              AND NOT EXISTS (
                   select 1 from ${w} w
                   where t.href = w.href
                     ${baseUrlColumnExists ? 'AND t.baseurl = w.baseurl' : ''}
                     ${pathColumnExists ? 'AND t.path = w.path' : ''}
-                )`);
+                )
+            `);
           console.log(`  -> Inserted ${insertResults.rowCount} rows into ${config.writeTable} in ${elapsedTimeString(beforeInsert, 's', insertResults.rowCount)}`);
         }
       } catch (e) {
@@ -1115,13 +1122,13 @@ const dbFactory = function dbFactory(configObject = {}) {
               ${resourceTypeColumnExists ? ', t.resourcetype' : ''}
               ${baseUrlColumnExists ? ', t.baseurl' : ''}
               ${pathColumnExists ? ', t.path' : ''}
-            FROM (select *,
-                  ROW_NUMBER() over (partition by
+            FROM (SELECT *,
+                    ROW_NUMBER() over (partition by
                         ${baseUrlColumnExists ? 'baseurl,' : ''}
                         ${pathColumnExists ? 'path,' : ''}
                         href
                       ORDER BY modified DESC) as rowNumber
-                  from [${tempTableNameForSafeDeltaSyncInserts}]) t
+                  FROM [${tempTableNameForSafeDeltaSyncInserts}]) t
             WHERE t.rowNumber = 1
               AND NOT EXISTS (
                 select 1 from [${config.schema}].[${config.writeTable}] w
@@ -1166,9 +1173,15 @@ const dbFactory = function dbFactory(configObject = {}) {
               ${resourceTypeColumnExists ? ', resourcetype' : ''}
               ${baseUrlColumnExists ? ', baseurl' : ''}
               ${pathColumnExists ? ', path' : ''}
-            FROM ${tempTableNameForSafeDeltaSyncInserts} t
-            WHERE
-              NOT EXISTS (
+            FROM (SELECT *,
+                    ROW_NUMBER() over (partition by
+                        ${baseUrlColumnExists ? 'baseurl,' : ''}
+                        ${pathColumnExists ? 'path,' : ''}
+                        href
+                      ORDER BY modified DESC) as rowNumber
+                  FROM ${tempTableNameForSafeDeltaSyncInserts}) t
+            WHERE t.rowNumber = 1
+              AND NOT EXISTS (
                   select 1 from ${w} w
                   where t.href = w.href
                     ${baseUrlColumnExists ? 'AND t.baseurl = w.baseurl' : ''}
