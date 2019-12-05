@@ -507,7 +507,7 @@ const dbFactory = function dbFactory(configObject = {}) {
               synctype varchar(64) NOT NULL,
               lastmodified bigint NOT NULL,
               syncstart bigint
-          );
+            );
             -- And add the necessary indexes for fast retrieval
             DO $$
               BEGIN
@@ -772,13 +772,17 @@ const dbFactory = function dbFactory(configObject = {}) {
         }
         if (pg) {
           const result = await doQuery(myTransaction,
-            `INSERT INTO ${config.schema}.${lastSyncTimesTableName} as t (tablename, baseurl, path, synctype, lastmodified, syncstart)
-            VALUES (\${tableName}, \${baseUrl}, \${path}, \${syncType}, \${lastModified}, \${syncStart})
-            ON CONFLICT (tablename, baseurl, path, synctype)
-              DO UPDATE
-              SET lastmodified = \${lastModified}, syncstart = \${syncStart}
-              WHERE t.tablename = \${tableName} AND t.baseurl = \${baseUrl} AND t.path = \${path} AND t.synctype = \${syncType}
+            `DELETE FROM ${config.schema}.${lastSyncTimesTableName} WHERE tablename = \${tableName} AND baseurl = \${baseUrl} AND path = \${path} AND synctype = \${syncType};
+            INSERT INTO ${config.schema}.${lastSyncTimesTableName} as t (tablename, baseurl, path, synctype, lastmodified, syncstart)
+            VALUES (\${tableName}, \${baseUrl}, \${path}, \${syncType}, \${lastModified}, \${syncStart});
             `,
+            // `INSERT INTO ${config.schema}.${lastSyncTimesTableName} as t (tablename, baseurl, path, synctype, lastmodified, syncstart)
+            // VALUES (\${tableName}, \${baseUrl}, \${path}, \${syncType}, \${lastModified}, \${syncStart})
+            // ON CONFLICT (tablename, baseurl, path, synctype)
+            //   DO UPDATE
+            //   SET lastmodified = \${lastModified}, syncstart = \${syncStart}
+            //   WHERE t.tablename = \${tableName} AND t.baseurl = \${baseUrl} AND t.path = \${path} AND t.synctype = \${syncType}
+            // `,
             [
               { name: 'tableName', value: config.table },
               { name: 'baseUrl', value: config.baseUrl },
