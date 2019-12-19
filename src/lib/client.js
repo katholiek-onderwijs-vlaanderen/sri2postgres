@@ -901,7 +901,7 @@ const dbFactory = function dbFactory(configObject = {}) {
           // const deleteResults = await deleteRequest.query(`DELETE FROM [${config.schema}].[${config.writeTable}]
           //   WHERE EXISTS (select 1 from [${tempTableNameForDeletes}] AS t where t.[key] = [${config.schema}].[${config.writeTable}].[key] AND t.resourceType = [${config.schema}].[${config.writeTable}].resourceType)`);
 
-          const fullSyncDeletesAll = !config.preferUpdatesOverInserts;
+          const fullSyncDeletesAll = config.preferUpdatesOverInserts === undefined ? false : !config.preferUpdatesOverInserts;
           const fullSyncDeleteQuery = fullSyncDeletesAll
             ? `DELETE w
               FROM [${config.schema}].[${config.writeTable}] w
@@ -963,7 +963,8 @@ const dbFactory = function dbFactory(configObject = {}) {
           // some records can appear multiple times if the result set changes while we are fetching
           // the pages, so try to remove doubles before inserting (take the one with most recent
           // modified)
-          const insertResults = await doQuery(transaction, `
+
+          const insertQueryBase = `
             INSERT INTO [${config.schema}].[${config.writeTable}](
               href, [key], modified, jsonData
               ${resourceTypeColumnExists ? ', resourcetype' : ''}
@@ -981,13 +982,25 @@ const dbFactory = function dbFactory(configObject = {}) {
                         href
                       ORDER BY modified DESC) as rowNumber
                   FROM [${tempTableNameForUpdates}]) t
-            WHERE t.rowNumber = 1
+            WHERE t.rowNumber = 1`;
+
+          let insertQueryExtra = '';
+          if (fullSync && fullSyncDeletesAll) {
+            console.log('  (insert query won\'t check if row already exists, because we have deleted all rows first)');
+          } else {
+            insertQueryExtra = `
               AND NOT EXISTS (
                 select 1 from [${config.schema}].[${config.writeTable}] w
                 where t.[href] = w.[href]
                   ${baseUrlColumnExists ? 'AND t.baseurl = w.baseurl' : ''}
                   ${pathColumnExists ? 'AND t.path = w.path' : ''}
-                )`);
+                )
+            `;
+          }
+
+          const insertQuery = insertQueryBase + insertQueryExtra;
+
+          const insertResults = await doQuery(transaction, insertQuery);
           console.log(`  -> Inserted ${insertResults.rowsAffected[0]} rows into ${config.writeTable} in ${elapsedTimeString(beforeInsert, 's', insertResults.rowsAffected[0])}`);
         } else if (pg) {
           const w = `${config.schema}.${config.writeTable}`;
@@ -1065,7 +1078,7 @@ const dbFactory = function dbFactory(configObject = {}) {
           // some records can appear multiple times if the result set changes while we are fetching
           // the pages, so try to remove doubles before inserting (take the one with most recent
           // modified)
-          const insertResults = await transaction.result(`INSERT INTO ${w}(
+          const insertQueryBase = `INSERT INTO ${w}(
               href, key, modified, jsonData
               ${resourceTypeColumnExists ? ', resourcetype' : ''}
               ${baseUrlColumnExists ? ', baseurl' : ''}
@@ -1083,13 +1096,25 @@ const dbFactory = function dbFactory(configObject = {}) {
                       ORDER BY modified DESC) as rowNumber
                   FROM ${tempTableNameForUpdates}) t
             WHERE t.rowNumber = 1
+          `;
+
+          let insertQueryExtra = '';
+          if (fullSync && fullSyncDeletesAll) {
+            console.log('  (insert query won\'t check if row already exists, because we have deleted all rows first)');
+          } else {
+            insertQueryExtra = `
               AND NOT EXISTS (
-                  select 1 from ${w} w
-                  where t.href = w.href
-                    ${baseUrlColumnExists ? 'AND t.baseurl = w.baseurl' : ''}
-                    ${pathColumnExists ? 'AND t.path = w.path' : ''}
-                )
-            `);
+                select 1 from ${w} w
+                where t.href = w.href
+                  ${baseUrlColumnExists ? 'AND t.baseurl = w.baseurl' : ''}
+                  ${pathColumnExists ? 'AND t.path = w.path' : ''}
+              )
+            `;
+          }
+
+          const insertQuery = insertQueryBase + insertQueryExtra;
+
+          const insertResults = await doQuery(transaction, insertQuery);
           console.log(`  -> Inserted ${insertResults.rowCount} rows into ${config.writeTable} in ${elapsedTimeString(beforeInsert, 's', insertResults.rowCount)}`);
         }
       } catch (e) {
