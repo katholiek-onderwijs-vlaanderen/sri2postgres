@@ -58,6 +58,7 @@ const sri2dbConfig = {
         username: 'dbusername',
         password: 'dbsecretpassword',
         ssl: true,
+        prefersUpdatesOverInserts: false, // [default = false] (currently for full sync only) first delete all rows, and then insert them again, instead of only deleting rows that don't exist anymore, and updating the already existing rows afterwards
     },
 }
 

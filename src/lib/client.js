@@ -901,7 +901,7 @@ const dbFactory = function dbFactory(configObject = {}) {
           // const deleteResults = await deleteRequest.query(`DELETE FROM [${config.schema}].[${config.writeTable}]
           //   WHERE EXISTS (select 1 from [${tempTableNameForDeletes}] AS t where t.[key] = [${config.schema}].[${config.writeTable}].[key] AND t.resourceType = [${config.schema}].[${config.writeTable}].resourceType)`);
 
-          const fullSyncDeletesAll = false;
+          const fullSyncDeletesAll = !config.preferUpdatesOverInserts;
           const fullSyncDeleteQuery = fullSyncDeletesAll
             ? `DELETE w
               FROM [${config.schema}].[${config.writeTable}] w
@@ -944,16 +944,20 @@ const dbFactory = function dbFactory(configObject = {}) {
           );
           console.log(`  -> Deleted ${deleteResults.rowsAffected[0]} rows from ${config.writeTable} in ${elapsedTimeString(beforeDelete, 's', deleteResults.rowsAffected[0])}`);
 
-          const beforeUpdate = Date.now();
-          const updateResults = await doQuery(transaction, `UPDATE w
-            SET w.modified = t.modified, w.jsonData = t.jsonData
-            FROM [${tempTableNameForUpdates}] t
-            INNER JOIN [${config.schema}].[${config.writeTable}] w
-              ON t.[href] = w.[href]
-                ${baseUrlColumnExists ? 'AND t.baseurl = w.baseurl' : ''}
-                ${pathColumnExists ? 'AND t.path = w.path' : ''}
-          `);
-          console.log(`  -> Updated ${updateResults.rowsAffected[0]} rows from ${config.writeTable} in ${elapsedTimeString(beforeUpdate, 's', updateResults.rowsAffected[0])}`);
+          if (fullSync && fullSyncDeletesAll) {
+            console.log(`  -> No updates needed because the full sync deleted all records first`);
+          } else {
+            const beforeUpdate = Date.now();
+            const updateResults = await doQuery(transaction, `UPDATE w
+              SET w.modified = t.modified, w.jsonData = t.jsonData
+              FROM [${tempTableNameForUpdates}] t
+              INNER JOIN [${config.schema}].[${config.writeTable}] w
+                ON t.[href] = w.[href]
+                  ${baseUrlColumnExists ? 'AND t.baseurl = w.baseurl' : ''}
+                  ${pathColumnExists ? 'AND t.path = w.path' : ''}
+            `);
+            console.log(`  -> Updated ${updateResults.rowsAffected[0]} rows from ${config.writeTable} in ${elapsedTimeString(beforeUpdate, 's', updateResults.rowsAffected[0])}`);
+          }
 
           const beforeInsert = Date.now();
           // some records can appear multiple times if the result set changes while we are fetching
@@ -986,6 +990,8 @@ const dbFactory = function dbFactory(configObject = {}) {
                 )`);
           console.log(`  -> Inserted ${insertResults.rowsAffected[0]} rows into ${config.writeTable} in ${elapsedTimeString(beforeInsert, 's', insertResults.rowsAffected[0])}`);
         } else if (pg) {
+          const w = `${config.schema}.${config.writeTable}`;
+
           // const tableResults = await doQuery(
           //   transaction,
           //   `SELECT 'deletes' as table, count(*) FROM ${tempTableNameForDeletes}
@@ -1002,7 +1008,7 @@ const dbFactory = function dbFactory(configObject = {}) {
 
           const beforeDelete = Date.now();
 
-          const fullSyncDeletesAll = false;
+          const fullSyncDeletesAll = !config.preferUpdatesOverInserts;
           const fullSyncDeleteQuery = fullSyncDeletesAll
             ? `DELETE FROM ${config.schema}.${config.writeTable} w
               WHERE 1=1
@@ -1040,16 +1046,19 @@ const dbFactory = function dbFactory(configObject = {}) {
           );
           console.log(`  -> Deleted ${deleteResults.rowCount} rows from ${config.writeTable} in ${elapsedTimeString(beforeDelete, 's', deleteResults.rowCount)}`);
 
-          const beforeUpdate = Date.now();
-          const w = `${config.schema}.${config.writeTable}`;
-          const updateResults = await doQuery(transaction, `UPDATE ${w}
-            SET modified = t.modified, jsonData = t.jsonData
-            FROM ${tempTableNameForUpdates} t
-            WHERE ${w}.href = t.href
-              ${baseUrlColumnExists ? `AND ${w}.baseurl = t.baseurl` : ''}
-              ${pathColumnExists ? `AND ${w}.path = t.path` : ''}
-          `);
-          console.log(`  -> Updated ${updateResults.rowCount} rows from ${config.writeTable} in ${elapsedTimeString(beforeUpdate, 's', updateResults.rowCount)}`);
+          if (fullSync && fullSyncDeletesAll) {
+            console.log(`  -> No updates needed because the full sync deleted all records first`);
+          } else {
+            const beforeUpdate = Date.now();
+            const updateResults = await doQuery(transaction, `UPDATE ${w}
+              SET modified = t.modified, jsonData = t.jsonData
+              FROM ${tempTableNameForUpdates} t
+              WHERE ${w}.href = t.href
+                ${baseUrlColumnExists ? `AND ${w}.baseurl = t.baseurl` : ''}
+                ${pathColumnExists ? `AND ${w}.path = t.path` : ''}
+            `);
+            console.log(`  -> Updated ${updateResults.rowCount} rows from ${config.writeTable} in ${elapsedTimeString(beforeUpdate, 's', updateResults.rowCount)}`);
+          }
 
           const beforeInsert = Date.now();
 
