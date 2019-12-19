@@ -1002,16 +1002,19 @@ const dbFactory = function dbFactory(configObject = {}) {
 
           const beforeDelete = Date.now();
 
-          const fullSyncDeletesAll = true;
+          const fullSyncDeletesAll = false;
           const fullSyncDeleteQuery = fullSyncDeletesAll
             ? `DELETE FROM ${config.schema}.${config.writeTable} w
               WHERE 1=1
                 ${baseUrlColumnExists ? 'AND baseurl = ${baseUrl}' : ''}
                 ${pathColumnExists ? 'AND path = ${path}' : ''}
             `
-            : `DELETE FROM ${config.schema}.${config.writeTable}
-              WHERE (${columnsForDeletes}) NOT IN (
-                SELECT ${columnsForDeletes} FROM ${tempTableNameForUpdates}
+            : `DELETE FROM ${config.schema}.${config.writeTable} w
+              WHERE NOT EXISTS (
+                SELECT 1 FROM ${tempTableNameForUpdates} t
+                WHERE t.href = w.href
+                  ${baseUrlColumnExists ? 'AND t.baseurl = w.baseUrl' : ''}
+                  ${pathColumnExists ? 'AND t.path = w.path' : ''}
               )
               ${baseUrlColumnExists ? 'AND baseurl = ${baseUrl}' : ''}
               ${pathColumnExists ? 'AND path = ${path}' : ''}
