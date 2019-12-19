@@ -1002,22 +1002,26 @@ const dbFactory = function dbFactory(configObject = {}) {
 
           const beforeDelete = Date.now();
 
-          const deleteResults = await doQuery(
-            transaction,
-            fullSync
-              ? `DELETE FROM ${config.schema}.${config.writeTable}
+          const fullSyncDeletesAll = true;
+          const fullSyncDeleteQuery = fullSyncDeletesAll
+            ? `DELETE FROM ${config.schema}.${config.writeTable} w
+              WHERE 1=1
+                ${baseUrlColumnExists ? 'AND baseurl = ${baseUrl}' : ''}
+                ${pathColumnExists ? 'AND path = ${path}' : ''}
+            `
+            : `DELETE FROM ${config.schema}.${config.writeTable}
               WHERE (${columnsForDeletes}) NOT IN (
                 SELECT ${columnsForDeletes} FROM ${tempTableNameForUpdates}
               )
               ${baseUrlColumnExists ? 'AND baseurl = ${baseUrl}' : ''}
               ${pathColumnExists ? 'AND path = ${path}' : ''}
-              `
-              // Fullsync Version that deletes all of them, instead of just the missing ones...
-              // `DELETE FROM ${config.schema}.${config.writeTable} w
-              //     WHERE 1=1
-              //       ${baseUrlColumnExists ? 'AND baseurl = ${baseUrl}' : ''}
-              //       ${pathColumnExists ? 'AND path = ${path}' : ''}
-              //   `
+            `;
+
+
+          const deleteResults = await doQuery(
+            transaction,
+            fullSync
+              ? fullSyncDeleteQuery
               : `DELETE FROM ${config.schema}.${config.writeTable} w
                   USING ${tempTableNameForDeletes} t
                   WHERE w.href = t.href
