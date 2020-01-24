@@ -35,8 +35,9 @@ try {
   config = require(program.config);
 } catch (e) {
   // no config found, try LOCAL config
-  console.log(`Config file ${program.config} not found, trying ./config.local.js (local development fallback)`);
-  config = require('./config.local');
+  console.log(`Config file ${program.config} not found!\n`);
+  program.outputHelp();
+  process.exit(-1);
 }
 
 async function main() {
