@@ -9,7 +9,7 @@ There is also a library called [sri4node](https://github.com/katholiek-onderwijs
 
 Installation is simple using npm :
 
-    $ npm install https://github.com/katholiek-onderwijs-vlaanderen/sri2db
+    $ npm install github:katholiek-onderwijs-vlaanderen/sri2db
 
 
 # About
