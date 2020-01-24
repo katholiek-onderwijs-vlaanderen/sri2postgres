@@ -5,7 +5,7 @@ var Client = require('./../../src/lib/client.js');
 var expect  = require("chai").expect;
 var express = require('express');
 
-var createSri2PostgresInstance = function (config) {
+var createSri2DbInstance = function (config) {
 
     return new Client(config);
 };
@@ -32,9 +32,9 @@ describe('Accessing invalid json Api', function() {
                 apiTimeOut: 8
             }
 
-            var sri2postgres = createSri2PostgresInstance(config);
+            var sri2db = createSri2DbInstance(config);
 
-            sri2postgres.getApiContent(function (error,response) {
+            sri2db.getApiContent(function (error,response) {
                 expect(response.statusCode).to.equal(200);
                 done();
             });

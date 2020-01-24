@@ -4,7 +4,7 @@
 var expect  = require("chai").expect;
 var Client = require('./../src/lib/client.js');
 
-var createSri2PostgresInstance = function (config) {
+var createSri2DbInstance = function (config) {
 
     return new Client(config);
 };
@@ -17,7 +17,7 @@ describe('Accessing external json Api', function() {
 
         it('throws an error', function(){
             var config = {};
-            expect(createSri2PostgresInstance.bind(config)).to.throw(Error);
+            expect(createSri2DbInstance.bind(config)).to.throw(Error);
         })
     });
 
@@ -28,9 +28,9 @@ describe('Accessing external json Api', function() {
             functionApiUrl: "/status"
         };
 
-        var sri2postgres = createSri2PostgresInstance(config);
+        var sri2db = createSri2DbInstance(config);
 
-        sri2postgres.getApiContent(function (error,response) {
+        sri2db.getApiContent(function (error,response) {
             expect(response.statusCode).to.equal(200);
             done();
         });
@@ -46,9 +46,9 @@ describe('Accessing external json Api', function() {
                 credentials: { username: 'postman', password: 'password' }
             };
 
-            var sri2postgres = createSri2PostgresInstance(config);
+            var sri2db = createSri2DbInstance(config);
 
-            sri2postgres.getApiContent(function (error,response) {
+            sri2db.getApiContent(function (error,response) {
                 expect(response.statusCode).to.equal(200);
                 done();
             });
@@ -62,9 +62,9 @@ describe('Accessing external json Api', function() {
                 credentials: { username: 'bad.user', password: 'bad.passowrd' }
             };
 
-            var sri2postgres = createSri2PostgresInstance(config);
+            var sri2db = createSri2DbInstance(config);
 
-            sri2postgres.getApiContent(function (error,response) {
+            sri2db.getApiContent(function (error,response) {
                 expect(response.statusCode).to.equal(401);
                 done();
             });

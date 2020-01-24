@@ -17,19 +17,19 @@ var config = JSON.parse(fs.readFileSync(configurationFile));
 var databaseHelper = new DatabaseHelper(config);
 
 
-describe('sri2postgres save an array of resources',function(){
+describe('sri2db save an array of resources',function(){
 
     var offset = 106300;
 
     config.baseApiUrl = "https://vsko-content-api-test.herokuapp.com";
     config.functionApiUrl = "/content?limit=100&offset="+offset;
-    config.dbTable = 'sri2postgres.jsonb';
-    var sri2postgres = new Client(config);
+    config.dbTable = 'sri2db.jsonb';
+    var sri2db = new Client(config);
     var resourcesCount = 0;
     var startedDateTime = new Date();
 
     before(function(done) {
-        var creationQuery = "CREATE SCHEMA sri2postgres AUTHORIZATION " + config.dbUser + "; SET search_path TO sri2postgres; DROP TABLE IF EXISTS jsonb CASCADE; CREATE TABLE jsonb (key uuid unique,value jsonb);";
+        var creationQuery = "CREATE SCHEMA sri2db AUTHORIZATION " + config.dbUser + "; SET search_path TO sri2db; DROP TABLE IF EXISTS jsonb CASCADE; CREATE TABLE jsonb (key uuid unique,value jsonb);";
         databaseHelper.executeQuery(creationQuery,done);
     });
 
@@ -37,7 +37,7 @@ describe('sri2postgres save an array of resources',function(){
 
         this.timeout(0);
 
-        sri2postgres.getApiContent().then(function(result){
+        sri2db.getApiContent().then(function(result){
             resourcesCount = Number(result.body.$$meta.count) - Number(offset);
             done();
         });
@@ -47,11 +47,11 @@ describe('sri2postgres save an array of resources',function(){
     it('persist JSON from api to configured postgres table',function(done){
         this.timeout(0);
 
-        sri2postgres.connect(function () {
+        sri2db.connect(function () {
 
-            sri2postgres.deleteFromTable({targetTable: config.dbTable}).then(function(){
+            sri2db.deleteFromTable({targetTable: config.dbTable}).then(function(){
 
-                sri2postgres.saveResources().then(function(result){
+                sri2db.saveResources().then(function(result){
                     expect(resourcesCount).to.equal(result.resourcesSync+result.resourcesNotSync);
                     done();
                 });
@@ -60,12 +60,12 @@ describe('sri2postgres save an array of resources',function(){
     });
 
     it ('should saved last sync time',function(done){
-        startedDateTime.should.beforeTime(sri2postgres.lastSync)
+        startedDateTime.should.beforeTime(sri2db.lastSync)
         done();
     });
 
     after(function(done) {
-        var dropQuery= "DROP SCHEMA IF EXISTS sri2postgres CASCADE;";
+        var dropQuery= "DROP SCHEMA IF EXISTS sri2db CASCADE;";
         databaseHelper.executeQuery(dropQuery,done);
     });
 });

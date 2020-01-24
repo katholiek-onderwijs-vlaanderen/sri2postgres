@@ -1,6 +1,6 @@
-CREATE SCHEMA sri2postgres AUTHORIZATION admin;
+CREATE SCHEMA sri2db AUTHORIZATION admin;
 
-SET search_path TO sri2postgres;
+SET search_path TO sri2db;
 
 DROP TABLE IF EXISTS "jsonb" CASCADE;
 
@@ -9,4 +9,4 @@ CREATE TABLE "jsonb" (
     "value" jsonb
 );
 
-DROP SCHEMA IF EXISTS sri2postgres CASCADE;
+DROP SCHEMA IF EXISTS sri2db CASCADE;

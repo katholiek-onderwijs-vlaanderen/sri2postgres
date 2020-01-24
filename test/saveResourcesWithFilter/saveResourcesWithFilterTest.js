@@ -17,16 +17,16 @@ var config = JSON.parse(fs.readFileSync(configurationFile));
 var databaseHelper = new DatabaseHelper(config);
 
 
-describe('sri2postgres.saveResources with filter',function(){
+describe('sri2db.saveResources with filter',function(){
 
     config.baseApiUrl = "https://vsko-content-api-test.herokuapp.com";
     config.functionApiUrl = "/content?limit=100";
-    config.dbTable = 'sri2postgres.jsonb';
-    var sri2postgres = new Client(config);
+    config.dbTable = 'sri2db.jsonb';
+    var sri2db = new Client(config);
     var syncResourcesWithoutFilter = 0;
 
     before(function(done) {
-        var creationQuery = "CREATE SCHEMA sri2postgres AUTHORIZATION " + config.dbUser + "; SET search_path TO sri2postgres; DROP TABLE IF EXISTS jsonb CASCADE; CREATE TABLE jsonb (key uuid unique,value jsonb);";
+        var creationQuery = "CREATE SCHEMA sri2db AUTHORIZATION " + config.dbUser + "; SET search_path TO sri2db; DROP TABLE IF EXISTS jsonb CASCADE; CREATE TABLE jsonb (key uuid unique,value jsonb);";
         databaseHelper.executeQuery(creationQuery,done);
     });
 
@@ -34,8 +34,8 @@ describe('sri2postgres.saveResources with filter',function(){
 
         this.timeout(0);
 
-        sri2postgres.connect(function () {
-            sri2postgres.saveResources().then(function(result){
+        sri2db.connect(function () {
+            sri2db.saveResources().then(function(result){
                 syncResourcesWithoutFilter = result.resourcesSync;
                 done();
             });
@@ -43,17 +43,17 @@ describe('sri2postgres.saveResources with filter',function(){
 
     });
 
-    it('should persist less resources than sri2postgres.saveResources without filter',function(done){
+    it('should persist less resources than sri2db.saveResources without filter',function(done){
 
         this.timeout(0);
 
         var filterObject = new CustomFilter();
 
-        //we have to tell sri2postgres to start over
-        sri2postgres.functionApiUrl = "/content?limit=100";
+        //we have to tell sri2db to start over
+        sri2db.functionApiUrl = "/content?limit=100";
 
-        sri2postgres.deleteFromTable({targetTable: config.dbTable}).then(function(){
-            sri2postgres.saveResources(filterObject).then(function(result){
+        sri2db.deleteFromTable({targetTable: config.dbTable}).then(function(){
+            sri2db.saveResources(filterObject).then(function(result){
                 expect(syncResourcesWithoutFilter).to.be.above(result.resourcesSync);
                 done();
             });
@@ -61,7 +61,7 @@ describe('sri2postgres.saveResources with filter',function(){
     });
 
     after(function(done) {
-        var dropQuery= "DROP SCHEMA IF EXISTS sri2postgres CASCADE;";
+        var dropQuery= "DROP SCHEMA IF EXISTS sri2db CASCADE;";
         databaseHelper.executeQuery(dropQuery,done);
     });
 });

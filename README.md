@@ -1,28 +1,57 @@
-# sri2postgres
+# sri2db
 
-This is a module to sync any SRI interface to a database table in a postgres 9.4 or up instance or to a somewhat recent MSSQL instance.
+This is a CLI tool & nodejs module to sync any SRI interface to a database table in a postgres 9.4 or up instance or to a somewhat recent MSSQL instance.
 The SRI specification can [be found here](https://github.com/katholiek-onderwijs-vlaanderen/sri).
+There is also a library called [sri4node](https://github.com/katholiek-onderwijs-vlaanderen/sri) that will help you to build sri-compliant API's in nodejs with a Postgres backend.
 
 
 # Installing
 
 Installation is simple using npm :
 
-    $ npm install https://github.com/katholiek-onderwijs-vlaanderen/sri2postgres
+    $ npm install https://github.com/katholiek-onderwijs-vlaanderen/sri2db
 
 
 # About
 
-The main idea of this module is to read all resources from an API and store them into a database in json format.
-A resource is basically a json object with attributes, like a school or a file or maybe a car.
+The main idea of this module is to read all resources from an API and store them into a database in json(b) format. (A resource is basically a json object with attributes, like a school or a file or maybe a car.)
+
+The database tables are not created for you, you need to set them up first (table layout is explained below).
+
+It contains both a command-line tool, and a library to use in your own code.
+
+# CLI Usage
+
+The easiest way should be to install it globally:
+
+    $ npm install -g https://github.com/katholiek-onderwijs-vlaanderen/sri2db
+
+Then you need to create a myconfig.js file that exports a valid config object:
+```
+module.exports = { ... }
+```
+The config object should either be a config object for Sri2Db or for Sri2DbMulti as explained below. The cli tool is smart enough to figure out whether it's a configuration for a single API, or for multiple API's.
+
+After that the tool can be run like this:
+
+    $ sri2db --config myconfig.js
+
+Or if you want to force another sync type than the configuredSync as indicated in the config file.
+
+    $ sri2db --config myconfig.js --synctype fullSync
+
+Maybe you have also configured a broadcast url (to listen for updates about resources). If you want the cli tool to connect to this server and keep listening, you can use the following syntax.
+(Setting synctype to none makes sure you only listen instead of executing the configuredSync at the very beginning.)
+
+    $ sri2db --config myconfig.js --synctype none --listen
 
 
-# Usage
+# NodeJS Usage
 
 Start by requiring the module in your code. 
     
 ```
-const { Sri2Db, Sri2DbMulti } = require('sri2postgres');
+const { Sri2Db, Sri2DbMulti } = require('sri2db');
 ```
 
 ## Sri2Db
@@ -293,7 +322,7 @@ and you will see:
             ✓ should respond OK with valid credentials (360ms)
             ✓ should return 401 error with invalid username and password (365ms)
     
-    sri2postgres save content
+    sri2db save content
         ✓ should throw an error if not table is defined
         ✓ persist JSON from api to configured postgres table (765ms)
         ✓ should update the same resource if it is saved again (574ms)
@@ -304,14 +333,14 @@ and you will see:
     Connecting to a correct Postgres DataBase
         ✓ should respond with no error
     
-    sri2postgres save an array of resources
+    sri2db save an array of resources
         ✓ persist JSON from api to configured postgres table (51263ms)
         ✓ should saved last sync time
     
-    sri2postgres.saveResources with filter
-        ✓ should persist less resources than sri2postgres.saveResources without filter (61595ms)
+    sri2db.saveResources with filter
+        ✓ should persist less resources than sri2db.saveResources without filter (61595ms)
     
-    sri2Postgres read an url property from jsonb 
+    sri2db read an url property from jsonb 
         ✓ should save the data content in passed table (219054ms)
     
     13 passing (7m)

@@ -4,9 +4,7 @@
 * Mostly rewritten by fre in 2019
 */
 
-// const request = require('requestretry');
 const util = require('util');
-const moment = require('moment');
 const clonedeep = require('lodash.clonedeep');
 const io = require('socket.io-client');
 const sriClientFactory = require('@kathondvla/sri-client/node-sri-client');
@@ -15,136 +13,15 @@ const pAll = require('p-all');
 const pSettle = require('p-settle');
 const jsonmergepatch = require('json-merge-patch');
 
+const {
+  removeDollarFields,
+  hashCode,
+  fixResourceForStoring,
+  setExpandOnPath,
+  elapsedTimeCalculations,
+  elapsedTimeString,
+} = require('./utils');
 
-/** **********************
- *   HELPER FUNCTIONS    *
- *********************** */
-
-const removeDollarFields = (obj) => {
-  Object.keys(obj).forEach((property) => {
-    if (property.startsWith('$$') && property != '$$meta') {
-      delete obj[property];
-    } else if (obj.property !== null && typeof obj.property === 'object') {
-      removeDollarFields(obj[property]);
-    }
-  });
-  return obj;
-};
-
-/**
- * Helper function to compute a hash code from a string as found here:
- *  https://stackoverflow.com/a/7616484
- */
-function hashCode(theString) {
-  let hash = 0;
-  let chr;
-  if (theString.length === 0) return hash;
-  for (let i = 0; i < theString.length; i++) {
-    chr = theString.charCodeAt(i);
-    hash = ((hash << 5) - hash) + chr;
-    // eslint-disable-next-line no-bitwise
-    hash |= 0; // Convert to 32bit integer
-  }
-  return hash;
-}
-
-/**
- * This function will make a few fixes to old api's that weren't fully compliant
- * to make sure the assumptions we make later on in the code will be valid.
- *
- * For example:
- *  * if a resource doesn't have a key, then we generate a key from the permalink
- *  * if a resource doesn't have $$meta.modified, then we'll add a default date in there
- *
- * @param {object} r
- */
-function fixResourceForStoring(r) {
-  if (r.$$meta && r.$$meta.modified && r.key) {
-    return r;
-  }
-  retVal = clonedeep(r);
-  if (!(r.$$meta && r.$$meta.modified)) {
-    retVal.$$meta.modified = new Date().toISOString();
-  }
-  if (!r.key && r.$$meta && r.$$meta.permalink) {
-    retVal.key = r.$$meta.permalink.substring(r.$$meta.permalink.lastIndexOf('/') + 1);
-  }
-  return retVal;
-}
-
-
-/**
- * Either adds expand= to the url or replaces the existing expand= with
- * the given expansion
- * @param {*} path
- * @param {*} expansion
- */
-function setExpandOnPath(path, expansion) {
-  if (path.includes('?') && path.includes('expand=')) {
-    return path.replace(/expand=[^&$]*/, `expand=${expansion}`);
-  }
-
-  return `${path}${path.includes('?') ? '&' : '?'}expand=${expansion}`;
-}
-
-/**
- * @param {Number} nrOfMilliseconds
- * @param {String} unit can be ms, s, m, h, d
- */
-const msToOtherUnit = (milliseconds, unit) => {
-  let elapsedInUnit;
-  switch (unit) {
-    case 'ms': elapsedInUnit = milliseconds; break;
-    case 's': elapsedInUnit = milliseconds / 1000; break;
-    case 'm': elapsedInUnit = milliseconds / 1000 / 60; break;
-    case 'h': elapsedInUnit = milliseconds / 1000 / 60 / 60; break;
-    case 'd': elapsedInUnit = milliseconds / 1000 / 60 / 60 / 24; break;
-    default: elapsedInUnit = milliseconds; break;
-  }
-  return elapsedInUnit;
-};
-
-/**
- * elapsedTimeCalculations calculates the elapsedMilliseconds given
- *
- * @param {Number} startDate obtained with a Date.now() call
- * @param {String} unit can be ms, s, m, h, d
- * @param {Number} amount [optional] if present will add avg per second/minute/hour
- * @param {String} avgUnit [optional] if not set, same unit as above, but you can make it avg per m, h, d, ... if you want
- * @param {Number} endDate [optional] obtained with a Date.now() call
- */
-/**
- *
- */
-const elapsedTimeCalculations = (startDate, unit = 'ms', amount = false, avgUnit = false, endDate = Date.now()) => {
-  // eslint-disable-next-line no-param-reassign
-  if (!avgUnit) avgUnit = unit;
-  const retVal = {
-    unit, amount, avgUnit, startDate, endDate,
-  };
-  retVal.elapsedMilliseconds = (endDate - startDate);
-  retVal.elapsedInUnit = msToOtherUnit(retVal.elapsedMilliseconds, unit);
-  retVal.elapsedInAvgUnit = msToOtherUnit(retVal.elapsedMilliseconds, avgUnit);
-  retVal.avgPerAvgUnit = amount ? Math.round(amount / retVal.elapsedInAvgUnit) : null;
-  return retVal;
-};
-
-const elapsedTimeCalculationsToString = (calc) => {
-  const avgPerSecondPart = calc.avgPerAvgUnit ? ` (${calc.avgPerAvgUnit}/${calc.avgUnit})` : '';
-  return `${Math.round(calc.elapsedInUnit * 100) / 100}${calc.unit}${avgPerSecondPart}`;
-};
-
-/**
- *
- * @param {Date} startDate
- * @param {String} unit can be ms, s, m, h, d
- * @param {Number} amount [optional] if present will add avg per second/minute/hour
- * @param {String} avgUnit [optional] if not set, same unit as above, but you can make it avg per m, h, d, ... if you want
- */
-const elapsedTimeString = (startDate, unit = 'ms', amount = false, avgUnit = false, endDate = Date.now()) => {
-  const calc = elapsedTimeCalculations(startDate, unit, amount, avgUnit, endDate);
-  return elapsedTimeCalculationsToString(calc);
-};
 
 
 /**
@@ -803,6 +680,30 @@ const dbFactory = function dbFactory(configObject = {}) {
     },
 
 
+    checkIfTableExists: async function checkIfTableExists(transaction) {
+      try {
+        let retVal = false;
+        if (mssql) {
+          retVal = true;
+        } else if (pg) {
+          retVal = await doQuery(transaction, `SELECT EXISTS (
+            SELECT 1
+            FROM   pg_tables
+            WHERE  schemaname = \${schemaName}
+            AND    tablename = \${tableName}
+          );`,
+          [
+            { name: 'schemaName', value: config.schema },
+            { name: 'tableName', value: config.table },
+          ]);
+        }
+        return retVal[0].exists;
+      } catch (e) {
+        console.log('[checkIfTableExists] FAILED', e, e.stack);
+        throw new Error('checkIfTableExists failed', e);
+      }
+    },
+
     /**
      * This creates the temp tables if they don't exist yet or empties them if they
      * do exist already!
@@ -1039,17 +940,32 @@ const dbFactory = function dbFactory(configObject = {}) {
               ${pathColumnExists ? 'AND path = ${path}' : ''}
             `;
 
+          // delete first seems only useful for full syncs
+          // (because in that the delete can be done without a joini)
+          const deltaSyncDeletesUpdatedRowsFirst = false; // !config.preferUpdatesOverInserts;
+          const deltaSyncDeleteQuery = deltaSyncDeletesUpdatedRowsFirst
+            ? `DELETE FROM ${config.schema}.${config.writeTable} w
+              USING ${tempTableNameForDeletes} t
+              WHERE w.href = t.href
+                ${baseUrlColumnExists ? 'AND w.baseurl = t.baseurl' : ''}
+                ${pathColumnExists ? 'AND w.path = t.path' : ''};
+
+              DELETE FROM ${config.schema}.${config.writeTable} w
+              USING ${tempTableNameForUpdates} t
+              WHERE w.href = t.href
+                ${baseUrlColumnExists ? 'AND w.baseurl = t.baseurl' : ''}
+                ${pathColumnExists ? 'AND w.path = t.path' : ''};
+            `
+            : `DELETE FROM ${config.schema}.${config.writeTable} w
+            USING ${tempTableNameForDeletes} t
+            WHERE w.href = t.href
+              ${baseUrlColumnExists ? 'AND w.baseurl = t.baseurl' : ''}
+              ${pathColumnExists ? 'AND w.path = t.path' : ''}
+            `;
 
           const deleteResults = await doQuery(
             transaction,
-            fullSync
-              ? fullSyncDeleteQuery
-              : `DELETE FROM ${config.schema}.${config.writeTable} w
-                  USING ${tempTableNameForDeletes} t
-                  WHERE w.href = t.href
-                  ${baseUrlColumnExists ? 'AND w.baseurl = t.baseurl' : ''}
-                  ${pathColumnExists ? 'AND w.path = t.path' : ''}
-            `,
+            fullSync ? fullSyncDeleteQuery : deltaSyncDeleteQuery,
             fullSync
               ? [
                 { name: 'baseUrl', value: config.baseUrl },
@@ -1061,6 +977,9 @@ const dbFactory = function dbFactory(configObject = {}) {
 
           if (fullSync && fullSyncDeletesAll) {
             console.log(`  -> No updates needed because the full sync deleted all records first`);
+          }
+          else if (!fullSync && deltaSyncDeletesUpdatedRowsFirst) {
+            console.log(`  -> No updates needed because the delta sync deleted all updated records first`);
           } else {
             const beforeUpdate = Date.now();
             const updateResults = await doQuery(transaction, `UPDATE ${w}
@@ -1679,6 +1598,14 @@ function Sri2DbFactory(configObject = {}) {
 
       const dbTransaction = await db.openTransaction();
       try {
+        if (!(await db.checkIfTableExists(dbTransaction))) {
+          console.log(`WARNING: it seems like the table ${config.db.table} doesn't exist`);
+          console.log(`Please run the following queries inside psql in order to create it.`);
+          console.log(`
+          CREATE TABLE ${config.db.schema}.${config.db.table} (href varchar, jsondata jsonb, modified timestamptz, key varchar, path varchar, baseurl varchar);
+          CREATE UNIQUE INDEX ${config.db.table}_baseurl_path_href_idx ON ${config.db.schema}.${config.db.table} (baseurl, path, href);`);
+        }
+
         // only needs to be awaited when we want to actually store stuff in the DB,
         // so we can start doing API requests before it is settled!
         const tempTablesInitializededPromise = db.createTempTables(dbTransaction);

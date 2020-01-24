@@ -11,9 +11,9 @@ var config = JSON.parse(fs.readFileSync(configurationFile));
 describe('Connecting to a correct Postgres DataBase',function(){
     it('should respond with no error', function (done) {
 
-        var sri2postgres = new Client(config);
+        var sri2db = new Client(config);
 
-        sri2postgres.connect(function (error) {
+        sri2db.connect(function (error) {
             expect(error).to.equal(null);
             done();
         });
