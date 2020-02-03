@@ -684,7 +684,20 @@ const dbFactory = function dbFactory(configObject = {}) {
       try {
         let retVal = false;
         if (mssql) {
-          retVal = true;
+          retVal = await doQuery(transaction, `SELECT CASE WHEN
+                EXISTS (
+                  SELECT 1
+                  FROM   INFORMATION_SCHEMA.TABLES
+                  WHERE  TABLE_SCHEMA = @schemaName
+                  AND    TABLE_NAME = @tableName
+                )
+              THEN CAST(1 AS BIT)
+              ELSE CAST(0 AS BIT)
+              END AS [exists];`,
+          [
+            { name: 'schemaName', type: mssql.VarChar, value: config.schema },
+            { name: 'tableName', type: mssql.VarChar, value: config.table },
+          ]);
         } else if (pg) {
           retVal = await doQuery(transaction, `SELECT EXISTS (
             SELECT 1
