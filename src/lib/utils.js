@@ -2,6 +2,9 @@
  *   HELPER FUNCTIONS    *
  *********************** */
 
+const clonedeep = require('lodash.clonedeep');
+
+
 const removeDollarFields = (obj) => {
   Object.keys(obj).forEach((property) => {
     if (property.startsWith('$$') && property != '$$meta') {
