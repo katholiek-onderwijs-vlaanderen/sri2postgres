@@ -20,7 +20,7 @@
     "moment": "^2.24.0"
   },
   "dependencies": {
-    "@kathondvla/sri-client": "git+https://github.com/katholiek-onderwijs-vlaanderen/sri-client.git#sprint-208-0",
+    "@kathondvla/sri-client": "git+https://github.com/katholiek-onderwijs-vlaanderen/sri-client.git#sprint-218-0",
     "commander": "4.1.0",
     "json-merge-patch": "0.2.3",
     "lodash.clonedeep": "4.5.0",
