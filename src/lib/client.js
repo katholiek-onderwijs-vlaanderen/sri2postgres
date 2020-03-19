@@ -214,6 +214,7 @@ const dbFactory = function dbFactory(configObject = {}) {
             table.rows.add(...addParams);
           });
         } else {
+          // TODO: in case expand=NONE this will not work, cfr. pg version to fix this
           records.forEach((r) => {
             const addParams = [r.$$meta.permalink];
             if (baseUrlColumnExists) addParams.push(config.baseUrl);
@@ -273,16 +274,29 @@ const dbFactory = function dbFactory(configObject = {}) {
           return value;
         // eslint-disable-next-line no-else-return
         } else {
-          const value = {
-            href: r.$$meta.permalink,
-            key: r.key,
-            modified: new Date(r.$$meta.modified),
-            jsondata: JSON.stringify(r),
-          };
-          if (resourceTypeColumnExists) value.resourcetype = r.$$meta.type;
-          if (baseUrlColumnExists) value.baseurl = config.baseUrl;
-          if (pathColumnExists) value.path = config.path;
-
+          let value = null;
+          if (typeof r === 'string') {
+            // THIS IS THE CASE WHEN expand=NONE
+            value = {
+              href: r,
+              key: r.substring(r.lastIndexOf('/') + 1),
+              modified: null,
+              jsondata: null,
+            };
+            if (resourceTypeColumnExists) value.resourcetype = null;
+            if (baseUrlColumnExists) value.baseurl = config.baseUrl;
+            if (pathColumnExists) value.path = config.path;
+          } else {
+            value = {
+              href: r.$$meta.permalink,
+              key: r.key,
+              modified: new Date(r.$$meta.modified),
+              jsondata: JSON.stringify(r),
+            };
+            if (resourceTypeColumnExists) value.resourcetype = r.$$meta.type;
+            if (baseUrlColumnExists) value.baseurl = config.baseUrl;
+            if (pathColumnExists) value.path = config.path;
+          }
           return value;
         }
       });
@@ -1647,14 +1661,21 @@ function Sri2DbFactory(configObject = {}) {
         await applyFunctionToList(async (resources, isLastPage, pageNum, count) => {
           console.log(`[page ${pageNum}] Trying to store ${resources.length} records on the DB for update/insert (${count} done so far)`);
 
-          // some old API's are missing $$meta.modified or even key
-          const resourcesToStore = resources.map(r => fixResourceForStoring(r));
-          await tempTablesInitializededPromise; // make sure temp tables have been created by now
-          await db.saveApiResultsToDb(resourcesToStore, dbTransaction);
-          lastModified = resourcesToStore.reduce(
-            (acc, cur) => (cur.$$meta.modified > acc ? cur.$$meta.modified : acc),
-            lastModified,
-          );
+          if (resources.some(r => typeof r === 'string')) {
+            // THIS IS THE expand=NONE case where we only store an href
+            // const resourcesToStore = resources.map(r => ({ $$meta: { permalink: r } }));
+            await tempTablesInitializededPromise; // make sure temp tables have been created by now
+            await db.saveApiResultsToDb(resources, dbTransaction);
+          } else {
+            // some old API's are missing $$meta.modified or even key
+            const resourcesToStore = resources.map(r => fixResourceForStoring(r));
+            await tempTablesInitializededPromise; // make sure temp tables have been created by now
+            await db.saveApiResultsToDb(resourcesToStore, dbTransaction);
+            lastModified = resourcesToStore.reduce(
+              (acc, cur) => (cur.$$meta.modified > acc ? cur.$$meta.modified : acc),
+              lastModified,
+            );
+          }
           // console.log('  Most recent lastmodified seen so far:', lastModified);
           console.log(`Synced ${count + resources.length} api resources so far in ${elapsedTimeString(beforeSync, 'm', count, 's')}.`);
 
