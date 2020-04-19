@@ -92,6 +92,10 @@ const dbFactory = function dbFactory(configObject = {}) {
     config.readTable = config.table;
   }
 
+  if (!config.maxBulkSize) {
+    config.maxBulkSize = 10000;
+  }
+
   const lastSyncTimesTableName = 'sri2db_synctimes';
   const tempTablePrefix = Math.random().toString(26).substring(5);
   const tempTableNameForUpdates = `${mssql ? '##' : ''}sri2db_${tempTablePrefix}_updates`;
@@ -183,6 +187,14 @@ const dbFactory = function dbFactory(configObject = {}) {
   async function doBulkInsert(dbTransaction, records, forDeletion = false, tableName = config.writeTable) {
     if (records && records.length === 0) {
       return 0;
+    }
+    // do multiple bulk inserts when the number of records the user wants to insert exceeds maxBulkSize
+    if (records && records.length > config.maxBulkSize) {
+      const recordsFirstPart = records.slice(0, config.maxBulkSize);
+      const recordsSecondPart = records.slice(config.maxBulkSize);
+      const retValFirstPart = await doBulkInsert(dbTransaction, recordsFirstPart, forDeletion, tableName);
+      const retValSecondPart = await doBulkInsert(dbTransaction, recordsSecondPart, forDeletion, tableName);
+      return retValFirstPart + retValSecondPart;
     }
 
     const beforeInsert = Date.now();
