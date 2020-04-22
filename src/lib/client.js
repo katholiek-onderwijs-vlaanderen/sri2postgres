@@ -770,31 +770,19 @@ const dbFactory = function dbFactory(configObject = {}) {
           //   .query(`SELECT OBJECT_ID(N'tempdb..${tempTableNameForUpdates}') as tableId`);
           // console.log('testResults', testResults.recordset[0]);
           const beforeCreateUpdatesTable = new Date();
-          const createRequest1 = await transaction.request();
-          const createResults1 = await createRequest1.query(
-            makeCreateTempTableString(tempTableNameForUpdates, false),
-          );
+          await doQuery(transaction, makeCreateTempTableString(tempTableNameForUpdates, false));
           console.log(`  Created temporary table for updated rows (${tempTableNameForUpdates}) in ${elapsedTimeString(beforeCreateUpdatesTable, 'ms')}\t${config.path}`);
 
           const beforeCreateDeletesTable = new Date();
-          const createRequest2 = await transaction.request();
-          const createResults2 = await createRequest2.query(
-            makeCreateTempTableString(tempTableNameForDeletes, true),
-          );
+          await doQuery(transaction, makeCreateTempTableString(tempTableNameForDeletes, true));
           console.log(`  Created temporary table for deleted hrefs (${tempTableNameForDeletes}) in ${elapsedTimeString(beforeCreateDeletesTable, 'ms')}\t${config.path}`);
 
           const beforeCreateSafeDeltaSyncTable = new Date();
-          const createRequest3 = await transaction.request();
-          const createResults3 = await createRequest3.query(
-            makeCreateTempTableString(tempTableNameForSafeDeltaSync, true),
-          );
+          await doQuery(transaction, makeCreateTempTableString(tempTableNameForSafeDeltaSync, true));
           console.log(`  Created temporary table for safe delta sync all hrefs (${tempTableNameForSafeDeltaSync}) in ${elapsedTimeString(beforeCreateSafeDeltaSyncTable, 'ms')}\t${config.path}`);
 
           const beforeCreateSafeDeltaSyncInsertsTable = new Date();
-          const createRequest4 = await transaction.request();
-          const createResults4 = await createRequest4.query(
-            makeCreateTempTableString(tempTableNameForSafeDeltaSyncInserts, false),
-          );
+          await doQuery(transaction, makeCreateTempTableString(tempTableNameForSafeDeltaSyncInserts, false));
           console.log(`  Created temporary table for safe delta sync rows to be inserted ((${tempTableNameForSafeDeltaSyncInserts})) in ${elapsedTimeString(beforeCreateSafeDeltaSyncInsertsTable, 'ms')}\t${config.path}`);
         } else if (pg) {
           const makeCreateTempTableString = (tblName, forDeletes) => `
@@ -805,27 +793,19 @@ const dbFactory = function dbFactory(configObject = {}) {
               TRUNCATE ${tblName};`;
 
           const beforeCreateUpdatesTable = new Date();
-          await transaction.none(
-            makeCreateTempTableString(tempTableNameForUpdates, false),
-          );
+          await doQuery(transaction, makeCreateTempTableString(tempTableNameForUpdates, false));
           console.log(`  Created temporary table for updated rows (${tempTableNameForUpdates}) in ${elapsedTimeString(beforeCreateUpdatesTable, 'ms')}\t${config.path}`);
 
           const beforeCreateDeletesTable = new Date();
-          transaction.none(
-            makeCreateTempTableString(tempTableNameForDeletes, true),
-          );
+          await doQuery(transaction, makeCreateTempTableString(tempTableNameForDeletes, true));
           console.log(`  Created temporary table for deleted rows (${tempTableNameForDeletes}) in ${elapsedTimeString(beforeCreateDeletesTable, 'ms')}\t${config.path}`);
 
           const beforeCreateSafeDeltaSyncTable = new Date();
-          transaction.none(
-            makeCreateTempTableString(tempTableNameForSafeDeltaSync, true),
-          );
+          await doQuery(transaction, makeCreateTempTableString(tempTableNameForSafeDeltaSync, true));
           console.log(`  Created temporary table for safe delta sync all rows (${tempTableNameForSafeDeltaSync}) in ${elapsedTimeString(beforeCreateSafeDeltaSyncTable, 'ms')}\t${config.path}`);
 
           const beforeCreateSafeDeltaSyncInsertsTable = new Date();
-          transaction.none(
-            makeCreateTempTableString(tempTableNameForSafeDeltaSyncInserts, false),
-          );
+          await doQuery(transaction, makeCreateTempTableString(tempTableNameForSafeDeltaSyncInserts, false));
           console.log(`  Created temporary table for safe delta sync rows to be inserted (${tempTableNameForSafeDeltaSyncInserts}) in ${elapsedTimeString(beforeCreateSafeDeltaSyncInsertsTable, 'ms')}\t${config.path}`);
         }
       } catch (e) {
@@ -1472,11 +1452,11 @@ function Sri2DbFactory(configObject = {}) {
      * @param {*} startOffset
      * @return { url: '<the url to fetch>', nextStartOffset: <offset to give to next call>, count: <nr of keys in url>}
      */
-    function getNextPath(keys, startOffset) {
-      let url = `${basePath}?keyIn=`;
+    function getNextPath(keys, startOffset, limit = 500) {
+      let url = `${basePath}?limit=${limit}&keyIn=`;
       let i = startOffset;
       let count = 0;
-      for (; url.length < 2048 && i < keys.length; i++, count++) {
+      for (; url.length < 2048 && i < keys.length && count < limit; i++, count++) {
         const addComma = url.lastIndexOf('=') !== url.length - 1;
         url = url + (addComma ? ',' : '') + keys[i];
       }
@@ -1486,16 +1466,19 @@ function Sri2DbFactory(configObject = {}) {
       return { nextPath: url, nextStartOffset: i, count };
     }
 
+    let currentStartOffset = 0;
     let { nextPath, nextStartOffset, count } = getNextPath(keys, 0);
     const getListOptions = { ...options, raw: true };
     let nextJsonDataPromise = api.getList(nextPath, {}, getListOptions);
     let pageNum = 0;
+    let totalCount = 0;
     const retVal = [];
     while (nextJsonDataPromise) {
-      console.log(`[getAllHrefs] Trying to get ${count} hrefs starting from ${nextStartOffset}`);
+      console.log(`[getAllHrefs] Trying to get ${count} hrefs starting from ${currentStartOffset}`);
       // eslint-disable-next-line no-await-in-loop
       const jsonData = await nextJsonDataPromise;
       const { nextPath: np, nextStartOffset: nso, count: c } = getNextPath(keys, nextStartOffset);
+      currentStartOffset = nextStartOffset;
       nextPath = np;
       nextStartOffset = nso;
       count = c;
@@ -1503,7 +1486,7 @@ function Sri2DbFactory(configObject = {}) {
       // already start fetching the next url
       nextJsonDataPromise = nextPath ? api.getList(nextPath, {}, getListOptions) : null;
 
-      count += jsonData.length;
+      totalCount += jsonData.length;
       pageNum += 1;
       retVal.push(...jsonData.map(r => r.$$expanded));
     }
@@ -1718,7 +1701,7 @@ function Sri2DbFactory(configObject = {}) {
           // fetch all records from the API that have become a part of the list recently,
           // but not because of a recent update of the resource itself (those would have been
           // found already with modifiedSince)
-          const hrefsToFetch = await db.findSafeSyncMissingHrefs(dbTransaction);
+          const hrefsToFetch = await db.findSafeSyncMissingHrefs(dbTransaction)
           if (hrefsToFetch.length > 0) {
             console.log(`Trying to fetch ${hrefsToFetch.length} resources from API`);
             const beforeFetch = Date.now();
@@ -1726,8 +1709,9 @@ function Sri2DbFactory(configObject = {}) {
               .map(r => fixResourceForStoring(r));
 
             console.log(`Fetched ${resourcesToStore.length} resources from API in ${elapsedTimeString(beforeFetch, 'm', resourcesToStore.length, 's')}.`);
-            await db.saveSafeSyncMissingApiResultsToDb(
+            totalCount += await db.saveSafeSyncMissingApiResultsToDb(
               resourcesToStore.map(r => (r.$$expanded || r)),
+              dbTransaction,
             );
           } else {
             console.log(`No resources to fetch from API (${hrefsToFetch.length} missing hrefs)`);
