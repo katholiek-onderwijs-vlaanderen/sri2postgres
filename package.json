@@ -1,6 +1,6 @@
 {
   "name": "sri2db",
-  "version": "3.0.8",
+  "version": "3.0.9",
   "description": "This is a module to sync any SRI interface to one or more database tables in a postgres 9.4 instance",
   "main": "./src/lib/client.js",
   "bin": "./bin/sri2db.js",
@@ -20,7 +20,7 @@
     "moment": "^2.24.0"
   },
   "dependencies": {
-    "@kathondvla/sri-client": "git+https://github.com/katholiek-onderwijs-vlaanderen/sri-client.git#sprint-218-0",
+    "@kathondvla/sri-client": "git+https://github.com/katholiek-onderwijs-vlaanderen/sri-client.git#2.3.2",
     "commander": "4.1.0",
     "json-merge-patch": "0.2.3",
     "lodash.clonedeep": "4.5.0",

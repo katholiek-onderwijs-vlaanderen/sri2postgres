@@ -131,6 +131,34 @@ const elapsedTimeString = (startDate, unit = 'ms', amount = false, avgUnit = fal
   return elapsedTimeCalculationsToString(calc);
 };
 
+/**
+ * Translates the API response to an array of either resources, or just hrefs
+ * (if no $$expanded available due to ?expand=NONE for example)
+ *
+ * We also try to make it smart enough to handle an array that returns a plain array
+ * (like security api query interface)
+ */
+const translateApiResponseToArrayOfResources = (jsonData) => {
+  let results;
+  if (Array.isArray(jsonData)) {
+    results = jsonData;
+  } else if (jsonData && jsonData.results && Array.isArray(jsonData.results)) {
+    results = jsonData.results;
+  }
+
+  if (results.length === 0) {
+    return [];
+  }
+  if (results[0].$$expanded) {
+    return results.map(r => r.$$expanded);
+  }
+  if (results[0].href) {
+    return results.map(r => r.href);
+  // } else if (results[0].person && typeof results[0].person === 'string') {
+  //  jsonData.map(r => r.person);
+  }
+  return results;
+};
 
 module.exports = {
   removeDollarFields,
@@ -141,4 +169,5 @@ module.exports = {
   elapsedTimeCalculations,
   elapsedTimeCalculationsToString,
   elapsedTimeString,
-}
+  translateApiResponseToArrayOfResources,
+};

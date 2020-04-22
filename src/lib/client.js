@@ -7,7 +7,7 @@
 const util = require('util');
 const clonedeep = require('lodash.clonedeep');
 const io = require('socket.io-client');
-const sriClientFactory = require('@kathondvla/sri-client/node-sri-client');
+const sriClientFactory = require('@kathondvla/sri-client/node-fetch'); // node-sri-client
 const SriClientError = require('@kathondvla/sri-client/sri-client-error');
 const pAll = require('p-all');
 const pSettle = require('p-settle');
@@ -20,6 +20,7 @@ const {
   setExpandOnPath,
   elapsedTimeCalculations,
   elapsedTimeString,
+  translateApiResponseToArrayOfResources,
 } = require('./utils');
 
 
@@ -131,7 +132,7 @@ const dbFactory = function dbFactory(configObject = {}) {
    *  JS template string)
    * @param {*} params if mssql: an array of { name: '', type: mssql.VarChar, value: ... }
    *   for postgres the type is not needed
-   * @param {bool} explain if true will run the query prependen with 'explain analyze' first,
+   * @param {bool} explain if true will run the query prepended with 'explain analyze' first,
    *   and print the results
    */
   async function doQuery(transaction, queryString, params = [], explain = false) {
@@ -473,6 +474,9 @@ const dbFactory = function dbFactory(configObject = {}) {
           min: 0,
           idleTimeoutMillis: 10 * 60 * 1000,
           connectionTimeout: 60 * 60 * 1000, // 1 hour
+          connectionTimeoutMillis: 60 * 60 * 1000, // 1 hour
+          query_timeout: 60 * 60 * 1000,
+          keepAlive: true,
           // },
           capSQL: true, // capitalize all generated SQL
         };
@@ -1227,13 +1231,16 @@ const dbFactory = function dbFactory(configObject = {}) {
           return results.map(r => r.href);
         } if (pg) {
           const beforeQuery = Date.now();
-          const query = `SELECT href FROM ${tempTableNameForSafeDeltaSync}
-            WHERE (${columnsForDeletes}) NOT IN (
-                SELECT ${columnsForDeletes} FROM ${config.schema}.${config.writeTable}
-              )
+          const query = `SELECT t.href 
+            FROM ${tempTableNameForSafeDeltaSync} t 
+              LEFT JOIN sri2db_test s ON s.href = t.href 
+                ${baseUrlColumnExists ? 'AND s.baseurl = t.baseUrl' : ''}
+                ${pathColumnExists ? 'AND s.path = t.path' : ''}
+            WHERE s.href IS NULL
             `;
+          const params = [];
 
-          const results = await doQuery(transaction, query);
+          const results = await doQuery(transaction, query, params);
           console.log(`  -> Returned ${results.length} rows from ${config.writeTable} in ${elapsedTimeString(beforeQuery, 's', results.length)}`);
           return results.map(r => r.href);
         }
@@ -1419,7 +1426,7 @@ function Sri2DbFactory(configObject = {}) {
     let nextPath = url;
     let nextOffset = 0;
     const getListOptions = { ...options, raw: true };
-    let nextJsonDataPromise = api.getList(url, {}, getListOptions);
+    let nextJsonDataPromise = api.getRaw(url, {}, getListOptions); // api.getList(url, {}, getListOptions);
     let pageNum = 0;
     let count = 0;
     while (nextJsonDataPromise) {
@@ -1427,29 +1434,27 @@ function Sri2DbFactory(configObject = {}) {
       // eslint-disable-next-line no-await-in-loop
       const jsonData = await nextJsonDataPromise;
       nextOffset += limit;
-      if (jsonData.next) {
+      if (jsonData.$$meta && jsonData.$$meta.next) {
         nextPath = options.nextLinksBroken
           ? `${url}&offset=${nextOffset}`
-          : jsonData.next;
+          : jsonData.$$meta.next;
       } else {
         nextPath = null;
       }
       // already start fetching the next url
-      nextJsonDataPromise = nextPath ? api.getList(`${nextPath}`, {}, { ...options, raw: true }) : null;
+      nextJsonDataPromise = nextPath ? api.getRaw(`${nextPath}`, {}, { ...options, raw: true }) : null;
 
       // apply async function to batch
       try {
-        const jsonDataTranslated = jsonData.length > 0 && jsonData[0].$$expanded
-          ? jsonData.map(r => r.$$expanded)
-          : jsonData.map(r => r.href);
+        const jsonDataTranslated = translateApiResponseToArrayOfResources(jsonData);
         // eslint-disable-next-line no-await-in-loop
         await asyncFunctionToApply(jsonDataTranslated, nextJsonDataPromise === null, pageNum, count);
+        count += jsonDataTranslated.length;
       } catch (e) {
         console.log('Error while trying to apply the given function to the current page', e.stack);
         throw e;
       }
 
-      count += jsonData.length;
       pageNum += 1;
     }
     return count;
@@ -1487,7 +1492,7 @@ function Sri2DbFactory(configObject = {}) {
     let pageNum = 0;
     const retVal = [];
     while (nextJsonDataPromise) {
-      console.log(`Trying to get ${count} hrefs starting from ${nextStartOffset}`);
+      console.log(`[getAllHrefs] Trying to get ${count} hrefs starting from ${nextStartOffset}`);
       // eslint-disable-next-line no-await-in-loop
       const jsonData = await nextJsonDataPromise;
       const { nextPath: np, nextStartOffset: nso, count: c } = getNextPath(keys, nextStartOffset);
