@@ -1815,12 +1815,8 @@ function Sri2DbFactory(configObject = {}) {
       return Promise.reject('Another sync is still running.');
     }
 
-    syncDonePromise = innerSync(modifiedSince, safeDeltaSync).then((result) => {
+    syncDonePromise = innerSync(modifiedSince, safeDeltaSync).finally(() => {
       syncDonePromise.settled = true;
-      return result;
-    }).catch((e) => {
-      syncDonePromise.settled = true;
-      throw e;
     });
     return syncDonePromise;
   };
@@ -2014,7 +2010,8 @@ function Sri2DbMultiFactory(configObject = {}) {
         async () => {
           console.log('[Sri2DMulti] Starting', methodName, 'for', c.config.api.path);
           // await sleep(2000);
-          return ((await pSettle([c[methodName]()]))[0]);
+          const result = (await pSettle([c[methodName]()]))[0];
+          return result;
         }
       ,
     );
