@@ -1196,7 +1196,7 @@ const dbFactory = function dbFactory(configObject = {}) {
           const query = `SELECT [href] FROM ${tempTableNameForSafeDeltaSync} s
             WHERE NOT EXISTS (
                 SELECT 1
-                FROM [dbo].[I_API_Test_Fre] i
+                FROM [${config.schema}].[${config.writeTable}] i
                 WHERE i.[href] = s.[href]
                   ${baseUrlColumnExists ? 'AND i.baseurl = s.baseurl' : ''}
                   ${pathColumnExists ? 'AND i.path = s.path' : ''}
@@ -1213,7 +1213,7 @@ const dbFactory = function dbFactory(configObject = {}) {
           const beforeQuery = Date.now();
           const query = `SELECT t.href 
             FROM ${tempTableNameForSafeDeltaSync} t 
-              LEFT JOIN sri2db_test s ON s.href = t.href 
+              LEFT JOIN ${config.schema}.${config.writeTable} s ON s.href = t.href 
                 ${baseUrlColumnExists ? 'AND s.baseurl = t.baseUrl' : ''}
                 ${pathColumnExists ? 'AND s.path = t.path' : ''}
             WHERE s.href IS NULL
