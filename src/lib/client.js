@@ -1211,9 +1211,9 @@ const dbFactory = function dbFactory(configObject = {}) {
           return results.map(r => r.href);
         } if (pg) {
           const beforeQuery = Date.now();
-          const query = `SELECT t.href 
-            FROM ${tempTableNameForSafeDeltaSync} t 
-              LEFT JOIN ${config.schema}.${config.writeTable} s ON s.href = t.href 
+          const query = `SELECT t.href
+            FROM ${tempTableNameForSafeDeltaSync} t
+              LEFT JOIN ${config.schema}.${config.writeTable} s ON s.href = t.href
                 ${baseUrlColumnExists ? 'AND s.baseurl = t.baseUrl' : ''}
                 ${pathColumnExists ? 'AND s.path = t.path' : ''}
             WHERE s.href IS NULL
@@ -1846,6 +1846,27 @@ function Sri2DbFactory(configObject = {}) {
     return sync(null);
   };
 
+  // // // // // // // // // // // // // // // // // // // // // // // // // // // // // // // //
+  // figure out which are the configuredSyncs (normal as well as broadcast)
+  // // // // // // // // // // // // // // // // // // // // // // // // // // // // // // // //
+
+  // for the configuredSync, if missing, full sync will be default
+  const methodNameToMethodMap = {
+    deltaSync,
+    safeDeltaSync,
+    fullSync,
+  };
+  const configuredSync = methodNameToMethodMap[config.syncMethod || 'fullSync'];
+  if (!configuredSync) {
+    throw new Error(`syncMethod '${config.syncMethod}' has an invalid value (supported values are: ${Object.keys(methodNameToMethodMap).join()})`);
+  }
+
+  // default broadcastSyncMethod = deltaSync
+  const configuredBroadcastSync = methodNameToMethodMap[config.broadcastSyncMethod || 'deltaSync'];
+  if (!configuredBroadcastSync) {
+    throw new Error(`broadcastSyncMethod '${config.broadcastSyncMethod}' has an invalid value (supported values are: ${Object.keys(methodNameToMethodMap).join()})`);
+  }
+
 
   let socket = null;
   let retryConnectInterval;
@@ -1863,7 +1884,7 @@ function Sri2DbFactory(configObject = {}) {
    * Utility function, should/can only set up a websocket if the config tells you
    * what the broadcastUrl is
    */
-  const installBroadCastListeners = function installBroadCastListeners(doSafeDeltaSync = false) {
+  const installBroadCastListeners = function installBroadCastListeners() {
     if (!config.broadcastUrl) {
       return null;
     }
@@ -1893,7 +1914,7 @@ function Sri2DbFactory(configObject = {}) {
 
         // simple version reconnects when signalled the connection isgone
         uninstallBroadCastListeners();
-        installBroadCastListeners(safeDeltaSync);
+        installBroadCastListeners();
 
         // ALTERNATIVE: retry strategy to set up the connection again?
         // retryConnectInterval = setInterval(10000, () => {
@@ -1906,15 +1927,14 @@ function Sri2DbFactory(configObject = {}) {
       socket.on('update', async (data) => {
         console.log(`--- Audit/broadcast sent us a new message: ${util.inspect(data)}, requesting new delta sync.`);
 
-        const syncMethod = doSafeDeltaSync ? safeDeltaSync : deltaSync;
         try {
-          await syncMethod();
+          await configuredBroadcastSync();
         } catch (e) {
           if (!retryBroadcastTriggeredSyncInterval) {
             retryBroadcastTriggeredSyncInterval = setInterval(
               async () => {
                 try {
-                  await syncMethod();
+                  await configuredBroadcastSync();
                   clearInterval(retryBroadcastTriggeredSyncInterval);
                 } catch (e2) {
                   console.error('Sync triggered by broadcast failed because:', e2);
@@ -1939,14 +1959,6 @@ function Sri2DbFactory(configObject = {}) {
   };
 
 
-  // for the configuredSync, if missing, full sync will be default
-  const methodNameToMethodMap = {
-    deltaSync,
-    safeDeltaSync,
-    fullSync,
-  };
-  const configuredSync = methodNameToMethodMap[config.syncMethod || 'fullSync'];
-  if (!configuredSync) throw `Sync type '${client.config.syncType}' doesn't map to a method`;
 
 
   // Now create and return the object containing the necessary functions for the user to use

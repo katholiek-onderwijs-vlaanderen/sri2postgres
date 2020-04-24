@@ -64,7 +64,8 @@ You will need to configure which api and which database through a config file:
 const sri2dbConfig = {
     syncMethod: 'fullSync' | 'deltaSync' | 'safeDeltaSync', // to define the sync that will be executed when calling client.configuredSync()
     dryRun: false, // true would rollback transactions to simply check if it all works
-    broadcastUrl: "https://some-broadcast-api.herokuapp.com/", // if you want to trigger delta syncs based on live updates via socket.io
+    broadcastUrl: 'https://some-broadcast-api.herokuapp.com/', // if you want to trigger delta syncs based on live updates via socket.io
+    broadcastSyncMethod: 'deltaSync', //deltaSync by default, but if you want to trigger another sync method for example a safeDeltaSync when a resource gets updated, you can configure it here
     api: {
         baseUrl: 'https://api.my.org',
         path: '/persons', //could also be /persons?gender=FEMALE if you only want to sync part of a list
@@ -161,7 +162,7 @@ But be aware that in this case the syncStart and lastModified will not be update
 A delta sync will return immediately with a return value of 0 if another one is still running!
 
 
-If you've configured the broadcast url, you can also start the listener, which will do a new delta sync anytime it gets a message:
+If you've configured the broadcast url, you can also start the listener, which will do a new delta sync (or the sync you've configured in broadcastSyncMethod) anytime it gets a message:
 
 ```
 client.installBroadCastListeners();
