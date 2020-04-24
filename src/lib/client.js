@@ -1815,9 +1815,18 @@ function Sri2DbFactory(configObject = {}) {
       return Promise.reject('Another sync is still running.');
     }
 
-    syncDonePromise = innerSync(modifiedSince, safeDeltaSync).finally(() => {
+    // Finally not supported in NodeJS 8 ?
+    // syncDonePromise = innerSync(modifiedSince, safeDeltaSync).finally(() => {
+    //   syncDonePromise.settled = true;
+    // });
+    syncDonePromise = innerSync(modifiedSince, safeDeltaSync).then((result) => {
       syncDonePromise.settled = true;
+      return result;
+    }).catch((e) => {
+      syncDonePromise.settled = true;
+      throw e;
     });
+
     return syncDonePromise;
   };
 
@@ -1912,7 +1921,7 @@ function Sri2DbFactory(configObject = {}) {
       socket.on('disconnect', () => {
         console.log('DISCONNECTED from audit/broadcast, trying to reconnect');
 
-        // simple version reconnects when signalled the connection isgone
+        // simple version reconnects when signalled the connection is gone
         uninstallBroadCastListeners();
         installBroadCastListeners();
 
