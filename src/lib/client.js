@@ -1946,7 +1946,7 @@ function Sri2DbFactory(configObject = {}) {
                   await configuredBroadcastSync();
                   clearInterval(retryBroadcastTriggeredSyncInterval);
                 } catch (e2) {
-                  console.error('Sync triggered by broadcast failed because:', e2);
+                  console.error(`Sync of ${config.api.baseUrl}${config.api.path} triggered by broadcast failed because:`, e2);
                 }
               },
               5000,
