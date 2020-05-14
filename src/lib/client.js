@@ -786,7 +786,7 @@ const dbFactory = function dbFactory(configObject = {}) {
           console.log(`  Created temporary table for safe delta sync rows to be inserted ((${tempTableNameForSafeDeltaSyncInserts})) in ${elapsedTimeString(beforeCreateSafeDeltaSyncInsertsTable, 'ms')}\t${config.path}`);
         } else if (pg) {
           const makeCreateTempTableString = (tblName, forDeletes) => `
-              CREATE GLOBAL TEMPORARY TABLE IF NOT EXISTS ${tblName}
+              CREATE TEMPORARY TABLE IF NOT EXISTS ${tblName} ON COMMIT DROP
               AS SELECT ${forDeletes ? columnsForDeletes : '*'} 
                  FROM ${config.schema}.${config.writeTable}
                  LIMIT 0;
