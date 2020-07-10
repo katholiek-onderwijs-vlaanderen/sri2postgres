@@ -395,8 +395,8 @@ const dbFactory = function dbFactory(configObject = {}) {
             BEGIN
               CREATE TABLE [${config.schema}].[${lastSyncTimesTableName}] (
                 tablename varchar(1024) NOT NULL,
-                baseurl varchar(1024) NOT NULL,
-                path varchar(1024) NOT NULL,
+                baseurl varchar(2048) NOT NULL,
+                path text NOT NULL,
                 synctype varchar(64) NOT NULL,
                 lastmodified bigint NOT NULL,
                 syncstart bigint

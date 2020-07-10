@@ -73,7 +73,6 @@ const sri2dbConfig = {
         password: 'secret',                      // can be omitted if API is public
         //headers: {}, //configure extra http headers if necessary
         timeout: 30000,
-        nrOfRetries: 2,
         limit: 2500,
         //nextLinksBroken: true, //false by default but workaround with limit & offset if for some reason they don't work reliably
         //deletedNotImplemented: true //false by default but skips sync of deleted for deltaSync (only needed for broken sri API's)
