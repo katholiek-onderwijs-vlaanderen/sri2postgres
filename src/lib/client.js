@@ -473,9 +473,9 @@ const dbFactory = function dbFactory(configObject = {}) {
           max: 10,
           min: 0,
           idleTimeoutMillis: 10 * 60 * 1000,
-          connectionTimeout: 60 * 60 * 1000, // 1 hour
-          connectionTimeoutMillis: 60 * 60 * 1000, // 1 hour
-          query_timeout: 60 * 60 * 1000,
+          connectionTimeout: 10 * 60 * 60 * 1000, // 10 hours
+          connectionTimeoutMillis: 10 * 60 * 60 * 1000, // 10 hours
+          query_timeout: 10 * 60 * 60 * 1000, // 10 hours
           keepAlive: true,
           // },
           capSQL: true, // capitalize all generated SQL
