@@ -1005,12 +1005,13 @@ const dbFactory = function dbFactory(configObject = {}) {
             console.log(`  -> No updates needed because the delta sync deleted all updated records first`);
           } else {
             const beforeUpdate = Date.now();
-            const updateResults = await doQuery(transaction, `UPDATE ${w}
+            const updateResults = await doQuery(transaction, `UPDATE ${w} w
               SET modified = t.modified, jsonData = t.jsonData
               FROM ${tempTableNameForUpdates} t
-              WHERE ${w}.href = t.href
-                ${baseUrlColumnExists ? `AND ${w}.baseurl = t.baseurl` : ''}
-                ${pathColumnExists ? `AND ${w}.path = t.path` : ''}
+              WHERE w.href = t.href
+                ${baseUrlColumnExists ? 'AND w.baseurl = t.baseurl' : ''}
+                ${pathColumnExists ? 'AND w.path = t.path' : ''}
+                AND w.jsondata <> t.jsondata
             `);
             console.log(`  -> Updated ${updateResults.rowCount} rows from ${config.writeTable} in ${elapsedTimeString(beforeUpdate, 's', updateResults.rowCount)}`);
           }
