@@ -879,6 +879,7 @@ const dbFactory = function dbFactory(configObject = {}) {
                 ON t.[href] = w.[href]
                   ${baseUrlColumnExists ? 'AND t.baseurl = w.baseurl' : ''}
                   ${pathColumnExists ? 'AND t.path = w.path' : ''}
+                  AND t.jsonData <> w.jsonData
             `);
             console.log(`  -> Updated ${updateResults.rowsAffected[0]} rows from ${config.writeTable} in ${elapsedTimeString(beforeUpdate, 's', updateResults.rowsAffected[0])}`);
           }
