@@ -71,7 +71,7 @@ async function main() {
         console.log('****************************************************************************************************');
         const messages = results.map((r, i) => (
           r.isFulfilled
-            ? `${r.value.config.api.path}: ${r.value.config.syncMethod} of ${r.value.amount} resources took ${elapsedTimeCalculationsToString(r.value)}`
+            ? `${r.value.config.api.path}: ${program.synctype === 'configuredSync' ? r.value.config.syncMethod : program.synctype} of ${r.value.amount} resources took ${elapsedTimeCalculationsToString(r.value)}`
             : `${config.overwrites[i].api.path}: ${program.synctype === 'configuredSync' ? config.overwrites[i].syncMethod || config.baseConfig.syncMethod || 'fullSync' : program.synctype} FAILED with reason: ${
               r.reason && r.reason.stack && r.reason.message ? `\n  ${r.reason.stack}` : JSON.stringify(r.reason)
             }`
