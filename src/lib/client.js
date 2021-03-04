@@ -879,7 +879,7 @@ const dbFactory = function dbFactory(configObject = {}) {
                 ON t.[href] = w.[href]
                   ${baseUrlColumnExists ? 'AND t.baseurl = w.baseurl' : ''}
                   ${pathColumnExists ? 'AND t.path = w.path' : ''}
-                  AND t.jsonData <> w.jsonData
+                  AND (t.jsonData <> w.jsonData OR (w.jsondata IS NULL and t.jsondata IS NOT NULL) OR (w.jsondata IS NOT NULL and t.jsondata IS NULL))
             `);
             console.log(`  -> Updated ${updateResults.rowsAffected[0]} rows from ${config.writeTable} in ${elapsedTimeString(beforeUpdate, 's', updateResults.rowsAffected[0])}`);
           }
@@ -1012,7 +1012,7 @@ const dbFactory = function dbFactory(configObject = {}) {
               WHERE w.href = t.href
                 ${baseUrlColumnExists ? 'AND w.baseurl = t.baseurl' : ''}
                 ${pathColumnExists ? 'AND w.path = t.path' : ''}
-                AND w.jsondata <> t.jsondata
+                AND (w.jsondata <> t.jsondata OR (w.jsondata IS NULL and t.jsondata IS NOT NULL) OR (w.jsondata IS NOT NULL and t.jsondata IS NULL))
             `);
             console.log(`  -> Updated ${updateResults.rowCount} rows from ${config.writeTable} in ${elapsedTimeString(beforeUpdate, 's', updateResults.rowCount)}`);
           }
@@ -1826,7 +1826,9 @@ function Sri2DbFactory(configObject = {}) {
       return result;
     }).catch((e) => {
       syncDonePromise.settled = true;
-      throw e;
+      console.warn('[sync] Error while trying to sync', e, e.stack);
+      // throw e;
+      throw new Error('[sync] Error while trying to sync', e);
     });
 
     return syncDonePromise;
